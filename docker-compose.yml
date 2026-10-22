@@ -1,0 +1,38 @@
+# bluesky-bot: the console + real Chrome on a noVNC desktop - `docker compose up -d --build`.
+# Settings come from backend/.env (copy backend/.env.example to start).
+#
+#   Console   http://<vm-ip>:4300
+#   Desktop   http://<vm-ip>:6080/vnc.html   (watch / sign in to Chrome)
+#
+# MinIO is the universal one every bot shares (MINIO_URL in backend/.env):
+# sessions in MINIO_SESSIONS_BUCKET, campaign messages from campaign-sms and
+# pictures from campaign-media.
+
+services:
+  app:
+    build: .
+    image: bluesky-bot-app:latest
+    container_name: bluesky-bot
+    init: true
+    shm_size: "512m"           # Chrome crashes tabs on Docker's 64 MB default
+    mem_limit: 1400m
+    stop_grace_period: 30s     # time for Chrome to close and save its profile
+    env_file:
+      - backend/.env
+    environment:
+      XBOT_HOST: 0.0.0.0
+      XBOT_PORT: 4300
+      XBOT_HEADLESS: "0"         # headed, on the noVNC desktop
+      XBOT_RELOAD: "0"
+      TZ: ${TZ:-Asia/Karachi}
+    ports:
+      - "4300:4300"
+      - "6080:6080"
+    volumes:
+      - profiles:/app/profiles        # cached Chrome profiles (also zipped to MinIO)
+      - app-data:/app/backend/data    # accounts, scraped.jsonl, screenshots
+    restart: unless-stopped
+
+volumes:
+  profiles:
+  app-data:
