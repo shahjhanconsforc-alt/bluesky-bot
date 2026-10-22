@@ -24,6 +24,7 @@ services:
       XBOT_PORT: 4300
       XBOT_HEADLESS: "0"         # headed, on the noVNC desktop
       XBOT_RELOAD: "0"
+      XBOT_NO_BROWSER: "1"       # don't open the console itself in Chrome
       TZ: ${TZ:-Asia/Karachi}
     ports:
       - "4300:4300"
