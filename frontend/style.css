@@ -1,0 +1,3100 @@
+/* bluesky-bot UI.
+ *
+ * A dense operator console: the tables and the activity feed are the product,
+ * so the chrome stays quiet and the type stays small. Light throughout — a
+ * cool grey page with white cards on it — and ONE accent: Bluesky's blue.
+ *
+ * The palette is bsky.app's own. Bluesky's web client is Inter on white, with
+ * hairline borders in a blue-tinted grey, near-black text that leans blue
+ * rather than warm, fully rounded buttons, and a single saturated blue doing
+ * every job an accent has: links, the active tab, the primary button, the
+ * focus ring. There is no gradient anywhere on the platform, so there is none
+ * here — the old three-stop sweep is gone and every place it was spent is a
+ * flat fill of the same blue.
+ *
+ * Because the accent took blue, --info moved off blue and onto indigo; the four
+ * status colours have to stay tellable apart from the accent and from each
+ * other at pill size.
+ *
+ * Every colour below was picked to sit on white: the status four, the eight
+ * feed-source hues and the six roster hues are all dark enough to read as text,
+ * and the tints that carry them stay at .10 — a whisper over white.
+ */
+
+:root {
+  /* Ground and the surfaces stacked on it. Three steps only: page, card, and
+   * the raised bits inside a card. More than that and nothing reads as a level.
+   * The greys are Bluesky's — cooled slightly toward blue, never neutral. */
+  --bg: #f1f3f5;
+  --card: #ffffff;
+  --raised: #f5f7f9;
+  --line: #d4dbe2;
+  --line-soft: #e4eaf0;
+
+  --ink: #0b0f14;
+  --muted: #42576c;
+  --faint: #7a8da0;
+
+  /* Bluesky blue. One accent in three weights: the resting fill, the hover,
+   * and the press. The soft tint is for selected rows, chips and focus rings. */
+  --accent: #1083fe;
+  --accent-hover: #0a6fe0;
+  --accent-press: #0860c4;
+  --accent-soft: rgba(16, 131, 254, .10);
+
+  /* Status. Used by the pills, the feed's level colours and the code badges.
+   * --info is indigo so it is never mistaken for the accent beside it. */
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --bad: #d93025;
+  --info: #4f46e5;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+* { box-sizing: border-box; }
+
+/* The browser's own `display: none` for [hidden] is a plain UA rule, so ANY
+ * class here that sets display — and the flex rows below are full of them —
+ * silently outranks it and the element stays on screen. Everything in this app
+ * hides by toggling the attribute, so it is stated once, here, with the weight
+ * to actually win. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.55 Inter, ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: grid;
+  /* `minmax(0, 1fr)`, never a bare `1fr`. A bare `1fr` may not be narrower than
+     the widest thing in it, and the header - brand, eight tabs and the status
+     pills at full width - is 1565px on its own: on a 1366px screen the column
+     grew to fit it and every panel came out wider than the window. The 0 lets
+     the page be exactly as wide as the window; the header's tabs already know
+     how to give up room when it is short. */
+  grid-template-columns: minmax(0, 1fr) 460px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "bar bar" "main feed";
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Every icon is a 24-box sprite drawn as a stroke, so one rule sizes and
+ * colours the lot and each button just picks a symbol. */
+/* The viewBox is an ATTRIBUTE on each <svg>, not a property here — there is no
+ * CSS `viewbox`, and without it the 24-unit paths draw at 1:1 inside a 16px box
+ * and spill over the label beside them. */
+.ic {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: hidden;
+}
+.ic-info { color: var(--info); }
+
+/* ── Header ─────────────────────────────────────────────────── */
+
+.bar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 20px;
+  height: 66px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+
+.bar h1 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -.2px;
+  white-space: nowrap;
+}
+/* Scoped to .accent, not to any span: .wordmark is a span too, and colouring
+ * that would sweep the whole name. */
+.bar h1 .accent { color: var(--accent); }
+/* The name and logo are the reset: stop everything, start fresh. */
+#app-reset { cursor: pointer; border-radius: 8px; }
+#app-reset:hover { opacity: .85; }
+#app-reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#app-reset.busy { opacity: .5; pointer-events: none; }
+
+/* Served at 64px and drawn at 28 so it stays sharp on a retina display. The
+ * width/height attributes are in the markup too, so the header doesn't reflow
+ * when the image lands. */
+.logo { width: 28px; height: 28px; flex: none; }
+
+/* ── Nav (lives in the header) ──────────────────────────────── */
+
+/* Eight tabs now, which is more than a 1366px laptop has room for beside the
+   brand and the status pills. Three things keep them out of each other's way:
+   the row may shrink (`min-width: 0`) and scrolls rather than spilling over
+   the pills when it must; the pills never give up width, because a pill that
+   has been squeezed to nothing is a status you cannot read; and the tabs
+   themselves get tighter on a narrower window, below. The scrollbar is hidden
+   - it would sit across the middle of the header - and the row still scrolls
+   by wheel or trackpad in the rare case it is needed. */
+.tabs { display: flex; gap: 2px; height: 100%; min-width: 0;
+        overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.tabs::-webkit-scrollbar { height: 0; width: 0; }
+.tabs button, .pill { white-space: nowrap; }
+.tabs button { flex: none; }
+
+.tabs button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  padding: 0 12px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  border-radius: 0;
+}
+.tabs button:hover { color: var(--ink); background: none; }
+/* A tab presses by colour only. The global 1px nudge would shift the selection
+ * underline off the header's baseline, and its background is deliberately none
+ * — a tinted panel behind a tab label reads as a second, competing selection. */
+.tabs button:active { transform: none; background: none; color: var(--accent); }
+/* The active tab is marked by the accent on BOTH the label and a rule beneath
+ * it. Colour alone is the kind of cue that vanishes for a colour-blind
+ * operator; the underline carries it independently. */
+/* The underline is bsky.app's own tab mark: 3px of the accent under the label.
+ * The label goes near-black rather than blue, as it does there — the rule
+ * carries the selection, the weight carries the emphasis. */
+.tabs button.on {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  background: none;
+}
+
+/* ── Pills ──────────────────────────────────────────────────── */
+
+.pills { margin-left: auto; display: flex; gap: 9px; align-items: center; flex: none; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--muted);
+}
+button.pill { cursor: pointer; }
+button.pill:hover { border-color: var(--faint); color: var(--ink); background: var(--raised); }
+
+.pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+/* The dot carries the state, so "up" and "down" differ without reading the
+ * label — which is the point of a status pill you glance at. */
+.pill.ok .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(26, 127, 55, .16); }
+.pill.bad .dot { background: var(--bad); box-shadow: 0 0 0 3px rgba(207, 34, 46, .16); }
+.pill.ok { color: var(--ink); }
+.pill.bad { color: var(--ink); }
+
+/* The run pill is the one thing on this bar that changes while you watch it. */
+.pill.run {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 500;
+}
+
+/* ── Layout ─────────────────────────────────────────────────── */
+
+main { grid-area: main; padding: 20px; overflow: auto; min-width: 0; }
+.bar { min-width: 0; }
+
+/* Feed hidden: the content well takes the full width. The stream itself keeps
+ * running underneath — closing a view must not stop collecting events, or
+ * reopening it would show a hole where the run you just watched should be. */
+body.no-feed {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "bar" "main";
+}
+body.no-feed .feed { display: none; }
+
+.panel { display: none; }
+.panel.on { display: block; }
+
+.grow { flex: 1; }
+.muted { color: var(--muted); }
+
+/* ── Cards ──────────────────────────────────────────────────── */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px 20px;
+  margin-bottom: 18px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  /* A heading, a source tag, a count and up to four buttons. On a narrow window
+     that is more than one line's worth, and without this they overflow the card
+     sideways instead of taking the second line they need. */
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.card-head h2 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.1px; }
+
+/* The tinted square is what makes a card scannable at a glance — you find the
+ * section by its mark before you read its title. */
+.card-ic {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+.card-ic .ic { width: 18px; height: 18px; }
+
+h3 { font-size: 12px; margin: 0; color: var(--muted); text-transform: uppercase;
+     letter-spacing: .6px; }
+
+.row { display: flex; align-items: center; gap: 9px; margin: 12px 0; }
+.row.wrap { flex-wrap: wrap; row-gap: 12px; }
+
+.hint {
+  color: var(--muted);
+  font-size: 12.5px;
+  margin: 0 0 12px;
+  max-width: 82ch;
+}
+
+/* ── Controls ───────────────────────────────────────────────── */
+
+button, .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--raised);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+button:hover, .btn:hover { border-color: var(--faint); background: #e4eaf0; }
+
+/* Pressed. Nearly every button here starts something that takes a moment — a
+ * login can sit for a minute waiting on a captcha — and a press with no colour
+ * change reads as a press that missed, which is how you end up with two. */
+button:active, .btn:active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(1px);
+}
+
+/* The primary is Bluesky's blue button: a flat fill that steps darker on hover
+ * and darker again when pressed, the way the platform's own does. */
+button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+button.primary:hover { background: var(--accent-hover); border-color: transparent; color: #fff; }
+/* The filled buttons go DARKER when pressed. Tinting them with accent-soft the
+ * way an outline button is tinted would wash them out instead of pushing them
+ * in, because their resting state is already the accent. */
+button.primary:active { background: var(--accent-press); border-color: transparent; color: #fff; }
+
+/* Destructive keeps its own colour — it sits inches from a primary button and
+ * must not read as just another one. Red, as it is on bsky.app. */
+button.danger { color: var(--bad); border-color: rgba(217, 48, 37, .38); }
+button.danger:hover { border-color: var(--bad); background: rgba(217, 48, 37, .10); }
+button.danger:active { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* Unavailable — greyed and inert. */
+button:disabled, .btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  background: var(--raised);
+  border-color: var(--line);
+  color: var(--muted);
+  transform: none;
+}
+button:disabled:hover { background: var(--raised); border-color: var(--line); }
+
+/* Running. A button is held disabled for exactly as long as its action takes,
+ * and "greyed out" is the wrong thing to say about the one that is working — so
+ * the busy button keeps the accent and breathes, while its idle neighbours dim.
+ * Listed after :disabled so it wins on a button that is both. */
+button.busy, button.busy:disabled, button.busy:hover {
+  opacity: 1;
+  cursor: progress;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: busy-pulse 1.1s ease-in-out infinite;
+}
+button.primary.busy, button.primary.busy:disabled {
+  background: var(--accent); border-color: transparent; color: #fff;
+}
+
+@keyframes busy-pulse { 50% { opacity: .5; } }
+
+/* A pulse is decoration; the colour already carries the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  button, .btn { transition: none; }
+  button.busy, button.busy:disabled { animation: none; }
+}
+
+button.tiny { padding: 4px 9px; font-size: 11.5px; }
+button.tiny .ic { width: 13px; height: 13px; }
+
+/* Square, icon-only. Its meaning comes from the title attribute, so it always
+ * carries one. */
+button.icon-btn { padding: 7px; }
+button.icon-btn.tiny { padding: 4px; }
+button.icon-btn.on { color: var(--accent); border-color: rgba(16, 131, 254, .34); }
+
+input, select, textarea {
+  background: var(--raised);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+}
+input::placeholder { color: var(--faint); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+textarea { width: 100%; resize: vertical; font-family: inherit; }
+select { cursor: pointer; }
+
+label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted);
+        font-size: 12.5px; }
+
+form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ── Tables ─────────────────────────────────────────────────── */
+
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--raised); }
+
+td a { color: var(--ink); text-decoration: none; border-bottom: 1px dotted var(--faint); }
+td a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+th.tick, td.tick { width: 30px; }
+td.acts { text-align: right; white-space: nowrap; }
+td.acts button { margin-left: 4px; }
+
+/* A bio is the widest and least predictable column — cap it so one long one
+ * can't push every other column off screen. The full text is in the title. */
+td.bio { max-width: 34ch; color: var(--muted); }
+
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+       margin-right: 6px; background: var(--faint); }
+.dot.ok { background: var(--ok); }
+.dot.off { background: var(--faint); }
+/* Stored but not open — a session this app has, on a browser that is not up. */
+.dot.warn { background: var(--warn); }
+
+/* ── Campaign wizard ────────────────────────────────────────── */
+
+/* `minmax(0, 1fr)`, not `1fr`: a grid track's automatic minimum is the
+ * min-content of what is in it, so a plain `1fr` here refused to go narrower
+ * than the widest card head in the wizard - a row of nowrap buttons - and the
+ * step column stayed 727px wide however narrow the window got, pushing the card
+ * out past `main` and putting a horizontal scrollbar on the page. The 0 minimum
+ * lets it shrink; the head below wraps rather than spilling. */
+.wizard { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 18px;
+          align-items: start; }
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  position: sticky;
+  top: 20px;              /* the rail stays put while a long step scrolls */
+}
+
+.steps button {
+  display: grid;
+  grid-template-columns: 24px 16px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 9px 10px;
+  text-align: left;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.steps button:hover { background: var(--raised); color: var(--ink); border-color: transparent; }
+.steps button.on {
+  background: var(--accent-soft);
+  border-color: rgba(16, 131, 254, .3);
+  color: var(--accent);
+}
+
+/* The number is what makes the rail read as a SEQUENCE rather than five
+ * unrelated tabs — the order here is real, and the operator shouldn't have to
+ * already know it. */
+.steps .num {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.steps button.on .num { background: var(--accent); border-color: var(--accent); color: #fff; }
+.steps button.done .num { color: var(--ok); border-color: rgba(26, 127, 55, .45); }
+
+/* The campaign's cog, last in the rail and pushed to its foot: the rail
+   stretches to the bottom of the window in the two-column layout, so the cog
+   sits at the screen's bottom edge, under Status, with the steps above it. It
+   borrows the step buttons' shape (the gear in the number's ring) without a
+   number or a tick, since it is a way in to the send's settings, not a step. */
+.steps .cog { margin-top: auto; grid-template-columns: 24px 1fr; }
+.steps .cog .num { color: var(--faint); }
+.steps .cog .num .ic { width: 13px; height: 13px; }
+.steps .cog:hover .num { color: var(--accent); border-color: rgba(16, 131, 254, .3); }
+
+/* A tick appears once a step is satisfied, so the rail doubles as progress. */
+.steps .tick { width: 14px; height: 14px; }
+.steps button.done .tick {
+  background: var(--ok);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+.step { display: none; }
+.step.on { display: block; }
+
+/* The minutes left of a break, beside its name in the live table. Tabular
+   digits so the countdown does not wobble as the numbers change. */
+.live-table .m-name .left { margin-left: 8px; font-weight: 500; color: var(--accent);
+                            font-variant-numeric: tabular-nums; }
+
+/* Step 4, shut: Bluesky chat takes no pictures. The notice says so, and the
+ * cards under it stay in view but greyed and inert, so the step reads as
+ * "here, but not for Bluesky" rather than as something broken or missing. */
+.media-notice { border-color: var(--warn); }
+.media-notice .card-ic { color: var(--warn); }
+.media-notice .hint { margin: 0; color: var(--ink); }
+.media-notice .hint strong { color: var(--warn); }
+.media-off { opacity: .4; pointer-events: none; user-select: none; filter: grayscale(1); }
+#camp-steps button.off .label { color: var(--faint); text-decoration: line-through; }
+
+/* ── Session card (campaign step 1) ─────────────────────────── */
+
+.session-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-top: 12px;
+}
+.session-card .field { display: grid; gap: 3px; }
+.session-card .k { color: var(--faint); font-size: 10.5px; text-transform: uppercase;
+                   letter-spacing: .5px; }
+.session-card .v { font-size: 12.5px; word-break: break-word; }
+.session-card .v.mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+
+/* ── Account cards (Accounts panel) ─────────────────────────── */
+/* One card per account, everything on it: name, email, the password behind an
+ * eye, and the actions as icons. Pink = a stored session. */
+
+.acct-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.acct-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 16px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.acct-card:hover { border-color: var(--faint); }
+.acct-card .ac-top { display: flex; align-items: center; gap: 8px; }
+.acct-card .ac-name { font-size: 13.5px; font-weight: 600;
+                      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-card .ac-mail { font-size: 12px; color: var(--muted); word-break: break-all; }
+.acct-card .ac-pass { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+.acct-card .ac-secret { font-family: ui-monospace, Consolas, monospace;
+                        font-size: 11.5px; color: var(--faint); word-break: break-all; }
+.acct-card .ac-sub { font-size: 11px; color: var(--faint); }
+
+/* The action icons sit quiet until you reach for them. */
+.acct-card .icon-btn { padding: 5px; color: var(--muted); border-color: transparent;
+                       background: transparent; }
+.acct-card .icon-btn:hover { color: var(--ink); border-color: var(--line);
+                             background: var(--card); }
+.acct-card .icon-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
+
+/* Stored session — the pink card. The accent border + soft fill is what tells a
+ * ready session apart from one that still needs a login, at a glance. */
+.acct-card.stored { background: var(--accent-soft); border-color: var(--accent); }
+.acct-card.stored .ac-name { color: var(--accent); }
+.acct-card.stored .ac-sub  { color: var(--accent); opacity: .85; }
+.acct-card.stored .icon-btn { color: var(--accent); }
+
+/* ── The campaign's account picker ──────────────────────────── */
+/* One tile per account, on the face of step 1. It replaced a <select>, which
+ * hid both of the things the step exists to answer — which accounts there are,
+ * and what state each one's session is in — behind a click, and answered the
+ * second one option at a time. */
+
+.acct-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.acct {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.acct:hover { border-color: var(--faint); color: var(--ink); }
+.acct.on { background: var(--accent-soft); border-color: var(--accent); }
+.acct.on .acct-name { color: var(--accent); }
+.acct-text { display: grid; gap: 1px; min-width: 0; }
+.acct-name { font-size: 12px; font-weight: 600; color: var(--ink);
+             white-space: nowrap; }
+/* The session, said on the tile: the picker is also the answer to "which of
+ * these can I actually run with". */
+.acct-state { font-size: 9.5px; color: var(--faint); white-space: nowrap; }
+.acct .dot { flex: none; }
+
+/* SEVERAL accounts can be picked — the campaign runs from all of them at once.
+ * A tick, not just the pink wash: with three of five selected the wash alone
+ * reads as "this one is highlighted", and the operator is choosing a set. */
+.acct-tick {
+  display: grid; place-items: center;
+  width: 15px; height: 15px; flex: none;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: transparent;
+}
+.acct-tick .ic { width: 11px; height: 11px; }
+.acct.on .acct-tick { background: var(--accent); border-color: var(--accent);
+                      color: #fff; }
+/* The one whose session is shown below the picker. A ring rather than a second
+ * fill — it is where you are LOOKING, not another thing that is selected. */
+.acct.shown { box-shadow: 0 0 0 2px var(--accent-soft); }
+
+/* How the recipients will be split, on the step where the accounts are picked. */
+#camp-accounts-note { font-size: 11px; color: var(--muted); }
+
+/* ── Active session (a browser is open on that profile) ─────── */
+
+.active-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+                margin: 0 0 12px; }
+.active-strip .as-label { font-size: 10.5px; text-transform: uppercase;
+                          letter-spacing: .5px; color: var(--faint); }
+.as-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  color: var(--ok);
+  background: rgba(26, 127, 55, .1);
+  border: 1px solid rgba(26, 127, 55, .38);
+  cursor: pointer;
+}
+.as-chip:hover { background: rgba(26, 127, 55, .18); border-color: var(--ok); }
+.as-chip:active { transform: translateY(1px); background: rgba(26, 127, 55, .24);
+                  color: var(--ok); border-color: var(--ok); }
+
+/* The scraping strip's chip only names the open account — there is nothing to
+ * click it for, so it drops the pointer the campaign's switcher chips carry.
+ * With several windows open it becomes a real button again, one per account. */
+.as-chip.static { cursor: default; }
+
+/* Not the one runs go to: still open, still green, but dimmed so the lit chip
+ * is unmistakably the target. */
+.active-strip button.as-chip {
+  opacity: .5;
+  font-weight: 400;
+}
+.active-strip button.as-chip.on {
+  opacity: 1;
+  font-weight: 600;
+  border-color: var(--ok);
+  background: rgba(26, 127, 55, .22);
+}
+.active-strip button.as-chip:hover { opacity: 1; }
+.active-strip .muted { font-size: 11.5px; }
+
+/* ── The scraping panel's lane strip ────────────────────────── */
+/* The same chips, doing a second job: before a run they are ticks, during one
+ * they are that account's own counter. Both at once is the point — the tick is
+ * how the operator chose the lane and the number is how that choice is going. */
+
+/* Mid-run they stop being a choice. Dimmed and dead rather than hidden: the
+ * strip is the only place that says which accounts this run is on. */
+.active-strip.lanes button.as-chip[disabled] { cursor: default; }
+.active-strip.lanes button.as-chip[disabled]:hover { opacity: inherit; }
+.active-strip.lanes button.as-chip.on[disabled]:hover { opacity: 1; }
+
+/* This lane's own count. Monospaced so a strip of them does not jitter every
+ * time one ticks over a digit. */
+.as-n {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(26, 127, 55, .18);
+}
+
+/* Still walking. A pulse rather than a word: with three lanes going the thing
+ * being asked is which of them are moving, and that reads faster as a light. */
+.as-dot {
+  width: 6px; height: 6px; flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  animation: as-pulse 1.3s ease-in-out infinite;
+}
+@keyframes as-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* A lane that was thrown off the feed, or whose window was closed under it. The
+ * other lanes carried on, so this has to be readable AT the account rather than
+ * as one line about the run: half a sweep is not the same answer as a whole one,
+ * and the total alone cannot say which this was. */
+.as-chip.lane-bad {
+  color: var(--bad);
+  background: rgba(207, 34, 46, .1);
+  border-color: rgba(207, 34, 46, .45);
+}
+.active-strip button.as-chip.lane-bad { opacity: 1; }
+.as-chip.lane-bad .as-n { background: rgba(207, 34, 46, .18); }
+
+/* ── The scraping gate ──────────────────────────────────────── */
+/* Shown when no browser is open. It is an instruction, not an error: nothing
+ * has gone wrong, the operator simply has not opened an account yet — so it
+ * reads in the accent, like the rest of the app's "do this next", rather than
+ * in the red kept for failures. */
+
+.gate {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(16, 131, 254, .38);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.gate-ic {
+  display: grid;
+  place-items: center;
+  width: 32px; height: 32px;
+  flex: none;
+  border-radius: 8px;
+  color: var(--accent);
+  background: rgba(16, 131, 254, .16);
+}
+
+.gate-text { display: grid; gap: 3px; max-width: 78ch; }
+.gate-text strong { font-size: 13px; }
+.gate-text span { color: var(--muted); font-size: 12px; }
+.gate-text b { color: var(--ink); font-weight: 600; }
+
+/* The icon quoted mid-sentence — sized down and lifted onto the text baseline,
+ * which a 16px box sitting on it is not. */
+.gate-hint-ic {
+  width: 13px; height: 13px;
+  vertical-align: -2px;
+  color: var(--ink);
+}
+
+/* Pressing a disabled button reports nothing, so a press while the gate is up
+ * points at the gate instead. */
+.gate.nudge { animation: gate-nudge .5s ease; }
+
+@keyframes gate-nudge {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-5px); }
+  45%      { transform: translateX(4px); }
+  70%      { transform: translateX(-2px); }
+}
+
+/* ── The scraping panel ─────────────────────────────────────── */
+/* A button, a count, a table. There is nothing left to pick — the page a scrape
+ * walks is Home and the reading is the hover — and nothing left to watch that
+ * the table is not already showing. */
+
+/* Stop, beside the button that starts the walk. Outline rather than filled: it
+ * is the safe half of the pair — everything collected is already on disk — and
+ * a solid red button next to a primary reads as the dangerous one. It appears
+ * only while a walk is going, which is the whole of how the panel says one is. */
+#pipe-stop { border-color: rgba(207, 34, 46, .45); color: var(--bad); }
+#pipe-stop:hover { border-color: var(--bad); background: rgba(207, 34, 46, .12); }
+#pipe-stop:active { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* ── Scraping: a denser panel ───────────────────────────────────
+   This panel is a WORKING view — a live roster filling in under a status strip
+   — and the app's default card spacing was laid out for the campaign wizard,
+   where each step is a handful of controls with room to breathe. Here the same
+   padding pushed the table that matters down the page and left a third of the
+   screen empty under it.
+   Scoped to this panel: the wizard's own spacing is right for the wizard. */
+
+.panel[data-panel="scraping"] .card { padding: 12px 14px 14px; margin-bottom: 12px; }
+.panel[data-panel="scraping"] .card-head { margin-bottom: 8px; }
+/* With the strip, the bar and the footer gone, the table is the panel — so it
+   gets the height they were using. */
+.panel[data-panel="scraping"] .pipe-board { margin-bottom: 0; }
+/* Measured from the window rather than as a share of it. `74vh` is 568px on a
+   1366x768 laptop, and the board's head above the table takes 212px whatever
+   the window - so three quarters of the viewport put the last rows below the
+   bottom of it and the operator had to scroll the PAGE to reach them, which is
+   the one thing a table with its own scrollbar should never make them do.
+   Subtracting the chrome instead keeps the table inside the window at every
+   height, and the 780px ceiling stops it becoming a wall on a tall monitor. */
+.panel[data-panel="scraping"] .mem-table-wrap {
+  max-height: min(calc(100svh - 260px), 780px);
+}
+
+/* The roster rows. Two columns now — a number and a name over an id — and the
+   avatar was the tallest thing in each, setting the row height on its own. A
+   few pixels a row is tens of rows over a scraped event. */
+#pipe-mem-table td { padding: 1px 8px; }
+#pipe-mem-table .avatar { width: 17px; height: 17px; }
+#pipe-mem-table .avatar .ic { width: 10px; height: 10px; }
+#pipe-mem-table .m-name { line-height: 1.25; }
+#pipe-mem-table .m-handle { line-height: 1.2; }
+
+/* A tick beside a button, for the switch that changes what that button does
+ * rather than being an action of its own. */
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.opt input { cursor: pointer; }
+
+/* ── The pipeline's board: the three facts AND the roster ───── */
+/* Category, event and member count sit directly on top of the table they
+ * describe, inside one frame — the count and the rows being counted are the
+ * same answer, and a gap between them made them read as two unrelated cards.
+ * The pager is the board's footer for the same reason. */
+
+.pipe-board {
+  margin: 0 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;                 /* so the corners cut the table and pager */
+}
+
+/* The run clock and the stall clock beside the count in the heading. */
+.scrape-timer, .scrape-quiet {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-left: 10px;
+  font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.scrape-timer .ic { width: 13px; height: 13px; }
+.scrape-timer.live { color: var(--info); font-weight: 600; }
+.scrape-quiet.warn { color: var(--bad); font-weight: 600; }
+.lane-tabs .tab-quiet { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.lane-tabs .tab-sep { color: var(--faint); opacity: .6; margin: 0 2px; }
+.lane-tabs .tab-skip { font-size: 10.5px; color: var(--faint); }
+.sum-breakdown { font-size: 12px; color: var(--muted); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.lane-tabs .tab-quiet.warn { color: var(--bad); }
+.lane-tabs .tab-r { font-size: 10.5px; color: var(--faint); }
+
+/* The per-account tabs on the scraping board. The header's tab style, on a
+ * bar of its own above the table: one tab per lane and one for everyone. */
+.lane-tabs {
+  height: auto;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel, transparent);
+  overflow-x: auto;
+}
+.lane-tabs button { padding: 9px 12px; font-size: 12.5px; white-space: nowrap; }
+.lane-tabs .tab-n {
+  font-size: 11px; font-weight: 600;
+  padding: 1px 7px; border-radius: 999px;
+  background: rgba(26, 127, 55, .12); color: var(--ok);
+  font-variant-numeric: tabular-nums;
+}
+.lane-tabs button.lane-bad .tab-n { background: rgba(207, 34, 46, .12); color: var(--bad); }
+.lane-tabs .as-dot { margin-left: 2px; }
+
+/* The count, in the heading beside the panel's name. It is the one number a
+ * walk with no end can honestly give — so it is set as a number, large enough
+ * to read from across the desk, and nothing is put around it. */
+.scrape-count {
+  display: inline-flex; align-items: baseline; gap: 5px;
+  margin-left: 4px;
+  font-size: 11.5px; color: var(--muted);
+}
+.scrape-count strong {
+  font-size: 19px; font-weight: 700; line-height: 1;
+  letter-spacing: -.3px;
+  color: var(--info);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The member table. Its own border only when it stands alone; inside the board
+ * the frame is the board's and the list scrolls within it. */
+/* Every table in the app is bounded and scrolls INSIDE ITS OWN BOX. None of
+   them is allowed to push the page down and make the window the scrollbar:
+   a table that runs off the bottom takes the card's head, the panel's
+   controls and the run's status with it, and the operator has to scroll back
+   up to see what they are looking at. So the default here is a height and a
+   scrollbar, and the panels that want a different height say so below
+   (`.pipe-board`, the scraping board, `.acct-wrap`, `.store-wrap`) rather
+   than opting into being bounded at all. */
+.mem-table-wrap {
+  max-height: min(62vh, 640px);
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+/* Inside the board the whole roster is on screen and the list scrolls, so it
+ * gets a height rather than a pager. The header row is already sticky, which is
+ * what makes a long scroll readable. */
+.pipe-board .mem-table-wrap {
+  border: 0;
+  border-radius: 0;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+}
+
+/* Set small, like the Data table: a roster runs to hundreds and the whole of
+ * it scrolls inside the board, so every point of type is rows the operator can
+ * see at once. The batch tints and the status badges do the separating. */
+.mem-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+/* A row with no name: its handle, once, in the name's place. */
+.m-name.m-only { color: var(--ink); text-decoration: none; }
+.m-name.m-only:hover { text-decoration: underline; }
+.mem-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .3px;
+  color: var(--faint);
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.mem-table td { padding: 3px 8px; border-bottom: 1px solid var(--line-soft);
+                vertical-align: middle; }
+.mem-table tbody tr:last-child td { border-bottom: 0; }
+
+.mem-table tbody tr.s-processing { background: rgba(79, 70, 229, .1); }
+/* A Bluesky-actions turn, written into the run between the messages it came
+   between. Tinted in the accent rather than the sending blue, so it reads as a
+   thing the run did rather than a recipient it reached. */
+.mem-table tbody tr.s-action { background: var(--accent-soft); }
+.mem-table tbody tr.s-action.s-processing { background: rgba(16, 131, 254, .18); }
+.mem-table tr.s-action .avatar.act { color: var(--accent); }
+.mem-table tr.s-action .m-handle { color: var(--muted); }
+/* Still to come. Faded, so the eye reads it as a plan rather than a thing done. */
+.mem-table tbody tr.s-action.s-planned { opacity: .7; }
+.mem-table tbody tr.note td { text-align: center; padding: 10px; }
+
+.mem-table .c-n { width: 46px; color: var(--faint); font-size: 9.5px;
+                  white-space: nowrap; }
+.mem-table .c-status { width: 150px; }
+
+.mem-table .th-ic { width: 11px; height: 11px; vertical-align: -2px;
+                    margin-right: 5px; color: var(--muted); }
+
+.mem-table .c-who { display: flex; align-items: center; gap: 7px; }
+.mem-table .who-text { display: grid; gap: 0; min-width: 0; }
+/* A placeholder avatar, not a photo: X's profile images are behind the same
+ * session as everything else, and a wall of broken images is worse than none. */
+.mem-table .avatar {
+  display: grid; place-items: center;
+  width: 19px; height: 19px; flex: none;
+  border-radius: 50%;
+  color: var(--info);
+  background: rgba(79, 70, 229, .12);
+}
+.mem-table .avatar .ic { width: 11px; height: 11px; }
+.mem-table .m-name { color: var(--ink); font-weight: 500; }
+/* An account X gives no open DM — real, countable, not messageable. */
+.mem-table tr.unreachable .m-name { color: var(--muted); }
+.mem-table .m-handle.none { font-style: italic; font-family: inherit;
+                            color: var(--faint); }
+.mem-table .m-handle { font-size: 9px; color: var(--muted);
+                       text-decoration: none; border: 0;
+                       font-family: ui-monospace, Consolas, monospace; }
+.mem-table .m-handle:hover { color: var(--accent); }
+.mem-table .c-sms { color: var(--muted); max-width: 280px; }
+
+/* The badge is the tallest thing in a row, so a smaller row has to take its
+ * height out of this. Sized here rather than on `.st` itself: that rule is the
+ * badge's own look — colours, pill, spinner — and belongs to the badge, not to
+ * whatever table happens to be showing one. */
+.mem-table .st { font-size: 9px; gap: 4px; padding: 2px 7px; }
+.mem-table .st .ic { width: 11px; height: 11px; }
+.mem-table .st-why { font-size: 8.5px; margin-top: 2px; }
+
+/* The status badge. Pending is quiet, processing is the one to watch, sent is
+ * the only green — a failure says why beside it, because "failed" on its own is
+ * not something an operator can act on. */
+.st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px; font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.st .ic { width: 13px; height: 13px; }
+
+.st.none { border-color: transparent; background: none; color: var(--faint); }
+.st.pending { color: var(--warn); border-color: rgba(154, 103, 0, .45);
+              background: rgba(154, 103, 0, .12); }
+.st.processing {
+  color: var(--info);
+  border-color: rgba(79, 70, 229, .5);
+  background: rgba(79, 70, 229, .14);
+}
+/* The spin belongs to the icon, not the badge — a pulsing pill in every row of a
+ * working page is a strobe. */
+.st.processing .ic { animation: st-spin 1.6s linear infinite; }
+.st.sent { color: var(--ok); border-color: rgba(26, 127, 55, .45);
+           background: rgba(26, 127, 55, .12); }
+/* Written, not sent — the composer is waiting on a person. Blue rather than
+ * green: nothing has left the building. */
+.st.typed { color: var(--info); border-color: rgba(79, 70, 229, .45);
+            background: rgba(79, 70, 229, .12); }
+.st.failed { color: var(--bad); border-color: rgba(207, 34, 46, .45);
+             background: rgba(207, 34, 46, .12); }
+.st-why { display: block; font-size: 10px; color: var(--faint); margin-top: 3px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@keyframes st-spin { to { transform: rotate(360deg); } }
+
+/* ── Data overview: the event rosters ───────────────────────── */
+/* Three things about one event, side by side: which event, how many people, and
+ * who they are. Each row carries its own hue across all three — the tile, the
+ * count and the name pills — because that is what keeps a wrapped block of
+ * forty names attached to the event it belongs to, down a long table. */
+
+.overview .ov-head { display: flex; align-items: center; gap: 12px;
+                     margin-bottom: 16px; }
+.overview .ov-ic {
+  display: grid; place-items: center;
+  width: 40px; height: 40px; flex: none;
+  border-radius: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.overview .ov-ic .ic { width: 20px; height: 20px; }
+.overview .ov-title { display: grid; gap: 2px; }
+.overview .ov-title h2 { margin: 0; font-size: 17px; font-weight: 600;
+                         letter-spacing: -.2px; }
+.overview .ov-sub { font-size: 11.5px; color: var(--muted); }
+.overview .ov-counts {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+  white-space: nowrap;
+}
+.overview .ov-total {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--info);
+}
+
+/* Set small and packed tight. A roster row is one line of reference — which
+ * event, how many, who — read down a column of twenty others, and at card size
+ * four events filled the panel. The hues and the pills do the separating that
+ * the padding used to. */
+/* The rows scroll in here, the page does not. Same shape as the member table
+ * in the board: the panel's own head stays put and the list moves under it,
+ * because scrolling the screen took the count and the Reload button off the
+ * top at the first turn of the wheel.
+ *
+ * A max-height rather than a height: four events should take four rows' worth
+ * of room, not a screenful with white space under it. */
+.roster-wrap {
+  max-height: min(66vh, 620px);
+  overflow-y: auto;
+  overflow-x: auto;
+  /* Room for the scrollbar to sit beside the rows rather than on top of their
+   * right-hand border and the buttons in the last column. */
+  padding-right: 4px;
+}
+
+.roster-table { width: 100%; border-collapse: separate; border-spacing: 0 4px;
+                font-size: 10.5px; }
+.roster-table thead th {
+  /* Stuck to the top of the scroller — a table whose columns scroll away is
+   * one where the middle of a long list says nothing about what it holds. The
+   * card's own ground behind it, or the rows would read through. */
+  position: sticky; top: 0; z-index: 1;
+  background: var(--card);
+  text-align: left;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .2px;
+  color: var(--muted);
+  padding: 6px 9px 5px;
+  white-space: nowrap;
+}
+.roster-table thead .th-ic { width: 11px; height: 11px; margin-right: 5px;
+                             vertical-align: -2px; color: var(--faint); }
+
+/* A row is a card: its own surface, its own border, air between it and the
+ * next. Cells carry the border so it survives border-collapse: separate. */
+.roster-table tbody td {
+  padding: 5px 9px;
+  vertical-align: middle;
+  background: var(--raised);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.roster-table tbody td:first-child { border-left: 1px solid var(--line);
+                                     border-radius: 7px 0 0 7px; }
+.roster-table tbody td:last-child { border-right: 1px solid var(--line);
+                                    border-radius: 0 7px 7px 0; }
+.roster-table tr.note td { text-align: center; padding: 11px;
+                           border-radius: 7px; border: 1px solid var(--line); }
+
+.roster-table .c-event { width: 22%; min-width: 150px; }
+.roster-table .c-count { width: 66px; text-align: center; }
+.roster-table .c-do { width: 62px; white-space: nowrap; text-align: right; }
+
+/* Event: a tinted tile, then the name. The flex is on a wrapper INSIDE the
+ * cell — a <td> set to flex leaves the table's box model and takes the column
+ * widths with it. */
+.r-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.r-tile {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; flex: none;
+  border-radius: 6px;
+  color: var(--row-hue, var(--accent));
+  background: var(--row-soft, var(--accent-soft));
+}
+.r-tile .ic { width: 12px; height: 12px; }
+.r-text { display: grid; gap: 0; min-width: 0; }
+/* The event's NAME and nothing else. The file size that used to sit under it
+ * was a fact about the object store, not about the event — nobody picks a
+ * roster by how many kilobytes it is, and it cost the row a second line. */
+.r-event { font-size: 11px; font-weight: 600; color: var(--ink);
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The Find tab the event was scraped under, under its name. Small and quiet:
+   it is where the event came FROM, which is context for the title above it
+   rather than a second thing to read. */
+.r-cat { font-size: 9px; color: var(--muted); text-transform: uppercase;
+         letter-spacing: .4px; overflow: hidden; text-overflow: ellipsis;
+         white-space: nowrap; }
+/* A roster written before the column existed. Italic and fainter, because "we
+   did not record it" is a different answer from a category called nothing. */
+.r-cat.none { color: var(--faint); font-style: italic; text-transform: none;
+              letter-spacing: 0; }
+
+/* Total users: the number alone, under a column already headed "Users". The
+ * word repeated on every row said nothing the header had not. */
+.roster-table .c-count { line-height: 1.1; }
+.r-n { display: block; font-size: 14px; font-weight: 700;
+       color: var(--row-hue, var(--accent)); }
+
+/* Usernames: soft pills that wrap, comma-separated, ten then "… see more". */
+.who-text { display: block; font-size: 9.5px; color: var(--faint);
+            line-height: 1.75; }
+.who-one {
+  padding: 1px 5px;
+  border-radius: 5px;
+  white-space: nowrap;
+  text-decoration: none;
+  border: 0;
+  color: var(--ink);
+  background: var(--row-soft, var(--accent-soft));
+}
+.who-one:hover { color: var(--row-hue, var(--accent)); }
+.who-one .w-id {
+  margin-left: 2px;
+  color: var(--faint);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 8.5px;
+}
+
+/* Part of the line, not a control beside it. */
+.who-text .more {
+  border: 0;
+  background: none;
+  padding: 0 0 0 6px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--row-hue, var(--accent));
+  cursor: pointer;
+}
+.who-text .more:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Download and delete, sized to the row rather than to the hand. They are the
+ * two rarest things in the panel — a row is read far more often than it is
+ * acted on — so they must not be what sets the row's height. */
+.roster-table .c-do .tiny { padding: 3px 5px; font-size: 10px; }
+.roster-table .c-do .ic { width: 11px; height: 11px; }
+
+/* The six row hues, cycling — the same six the member table's batches use, so
+ * a colour means the same thing in both places. */
+.roster-table .rt-1 { --row-hue: #1083fe; --row-soft: rgba(16, 131, 254, .10); }
+.roster-table .rt-2 { --row-hue: #1a7f37; --row-soft: rgba(26, 127, 55, .10); }
+.roster-table .rt-3 { --row-hue: #9a6700; --row-soft: rgba(154, 103, 0, .10); }
+.roster-table .rt-4 { --row-hue: #4f46e5; --row-soft: rgba(79, 70, 229, .10); }
+.roster-table .rt-5 { --row-hue: #0f766e; --row-soft: rgba(15, 118, 110, .10); }
+.roster-table .rt-6 { --row-hue: #be185d; --row-soft: rgba(190, 24, 93, .10); }
+
+/* ── The board's footer ─────────────────────────────────────── */
+/* What the list holds, under the list itself. The pager that used to live here
+ * is gone: the roster scrolls in one piece now, so there are no pages to number
+ * and nothing to step through. */
+
+.board-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--raised);
+}
+.board-foot .muted { font-size: 11px; }
+.pager-info { font-size: 11.5px; color: var(--muted); }
+
+/* ── Checklist (campaign step 5) ────────────────────────────── */
+
+.checklist { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 2px; }
+
+.checklist li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 4px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+.checklist li:last-child { border-bottom: none; }
+.checklist .mark {
+  display: grid; place-items: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--raised);
+  font-size: 11px; color: var(--faint);
+}
+.checklist li.ok .mark { background: rgba(26, 127, 55, .15); border-color: rgba(26, 127, 55, .5); color: var(--ok); }
+.checklist li.no .mark { background: rgba(154, 103, 0, .13); border-color: rgba(154, 103, 0, .45); color: var(--warn); }
+.checklist .detail { color: var(--muted); font-size: 11.5px; }
+
+/* ── Dropzones ──────────────────────────────────────────────── */
+
+.dropzone {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 30px 20px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .15s, background .15s;
+}
+.dropzone:hover { border-color: var(--faint); }
+/* Applied while a file is dragged over it. Without a visible state the drop
+ * target is invisible until it either works or doesn't. */
+.dropzone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.dropzone strong { color: var(--ink); font-size: 13px; font-weight: 500; }
+.dropzone.over strong { color: var(--accent); }
+.dropzone .ic.big { width: 28px; height: 28px; stroke-width: 1.5; }
+.dropzone.busy { opacity: .6; pointer-events: none; }
+
+.upload-info {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--raised);
+  font-size: 12px;
+  color: var(--muted);
+}
+.upload-info.ok { border-color: rgba(26, 127, 55, .4); }
+.upload-info.bad { border-color: rgba(207, 34, 46, .45); color: var(--bad); }
+.upload-info b { color: var(--ink); font-weight: 600; }
+
+/* ── Upload preview ─────────────────────────────────────────── */
+
+.preview-table {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.preview-table .head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--faint);
+}
+/* Capped and scrollable: a 5,000-row upload must not turn the step into an
+ * infinite page you have to scroll past to reach the buttons. */
+.preview-table .body { max-height: 300px; overflow: auto; }
+.preview-table .prow {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+.preview-table .prow:last-child { border-bottom: none; }
+.preview-table .n { color: var(--faint); font-variant-numeric: tabular-nums; }
+.preview-table .h { font-family: ui-monospace, Consolas, monospace; }
+.preview-table .who-text { display: grid; gap: 0; min-width: 0; }
+.preview-table .m-name { color: var(--ink); font-weight: 500; overflow: hidden;
+                         text-overflow: ellipsis; white-space: nowrap; }
+.preview-table .m-handle { font-family: ui-monospace, Consolas, monospace;
+                           font-size: 9px; color: var(--muted);
+                           text-decoration: none; border: 0;
+                           overflow: hidden; text-overflow: ellipsis;
+                           white-space: nowrap; }
+.preview-table .m-handle:hover { color: var(--accent); }
+
+/* ── Where a card's contents came from ──────────────────────── */
+/* Three of the campaign's cards are windows onto the store rather than onto
+ * anything this app holds in memory. An empty one is then two different facts —
+ * nothing stored, or the store unreachable — and the tag is what makes the
+ * question askable without opening the terminal. */
+.src-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--faint);
+  font-size: 9.5px; font-weight: 600;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+
+/* ── The stored users (campaign step 2) ─────────────────────── */
+/* The member store, listed rather than counted. Sized like the other two
+ * tables in the app — small and dense — because the whole point is seeing how
+ * many of them there are at once. */
+
+.store-wrap {
+  margin-top: 10px;
+  /* The fallback, for the stacked layout below and for any context where the
+     card is not being given a height to fill. Where it is - see the block at
+     the end of this file - this cap is lifted and the table takes the window. */
+  max-height: min(46vh, 420px);
+  overflow-y: auto;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.store-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+.store-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 9px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .3px;
+  color: var(--faint);
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.store-table td { padding: 3px 8px; border-bottom: 1px solid var(--line-soft);
+                  vertical-align: middle; }
+.store-table tbody tr:last-child td { border-bottom: 0; }
+.store-table tr.note td { text-align: center; padding: 14px; }
+
+/* Table left, filters right. The rail is fixed and the table takes the slack:
+ * the controls are the same six whatever the list is doing, and a rail that
+ * breathed with the column beside it would move the OK button every time a
+ * filter changed how wide the bios are. */
+.store-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 208px;
+  gap: 10px;
+  align-items: start;
+  margin-top: 10px;
+}
+.store-body .store-wrap { margin-top: 0; }
+
+/* Narrow enough that the table keeps most of the card — this is a side rail,
+ * not a second panel. It scrolls with the table rather than with the page so a
+ * long list does not leave OK somewhere above the fold. */
+.store-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  font-size: 11px;
+}
+.store-filters .sf-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.store-filters .sf-head strong { font-size: 11.5px; letter-spacing: .2px; }
+.store-filters .sf-head .ic { width: 13px; height: 13px; color: var(--faint); }
+
+/* What OK would leave standing. Quiet while it agrees with the table, lit the
+ * moment it stops — that difference IS the prompt to press OK, so it has to be
+ * the one thing on the rail that changes colour. */
+.sf-pending { font-size: 10px; color: var(--faint); white-space: nowrap;
+              font-variant-numeric: tabular-nums; }
+.sf-pending.stale { color: var(--accent); font-weight: 600; }
+
+/* One fold per filter. The summary is the whole control when the group is shut,
+ * so it has to carry three things on one 188px line: the arrow, the name, and
+ * what the filter is set to. The value takes the slack and truncates - a long
+ * category name losing its tail is better than a summary that wraps to two
+ * lines and moves every group below it. */
+.store-filters .sf-group {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 7px;
+}
+.store-filters .sf-group:first-of-type { border-top: 0; padding-top: 0; }
+
+.store-filters .sf-group > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  border-radius: 4px;
+  padding: 2px 2px;
+  margin: -2px -2px;
+}
+/* The browser's own disclosure triangle, gone in both dialects - the arrow in
+   the markup is the one that rotates. */
+.store-filters .sf-group > summary { list-style: none; }
+.store-filters .sf-group > summary::-webkit-details-marker { display: none; }
+.store-filters .sf-group > summary:hover { color: var(--ink); background: var(--card); }
+.store-filters .sf-group > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Right when shut, down when open. One rule, because there is one mark. */
+.store-filters .sf-arrow {
+  width: 11px; height: 11px;
+  flex: none;
+  color: var(--faint);
+  transition: transform .15s ease;
+}
+.store-filters .sf-group[open] > summary .sf-arrow { transform: rotate(90deg); }
+.store-filters .sf-name { flex: none; }
+
+/* What a SHUT group is set to. Never wraps, never pushes the arrow around. */
+.store-filters .sf-value {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* This group is doing something. The dot is on the summary rather than the
+   value, so it shows while the group is OPEN too - a filter left on and scrolled
+   past is the thing this rail must never let happen quietly. */
+.store-filters .sf-group.set > summary .sf-name { color: var(--accent); }
+.store-filters .sf-group.set > summary .sf-name::after {
+  content: "";
+  display: inline-block;
+  width: 4px; height: 4px;
+  margin-left: 5px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.store-filters .sf-group.set > summary .sf-value { color: var(--accent); }
+
+.store-filters .sf-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 0 2px;
+}
+.store-filters .sf-body input,
+.store-filters .sf-body select {
+  width: 100%;
+  min-width: 0;
+  font-size: 11px;
+}
+.store-filters .sf-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink);
+}
+
+/* The send-count buckets. Chips rather than a stack of checkboxes: six of them
+ * down the rail would have been taller than everything else on it put together,
+ * and they are scanned as a row of numbers, not read. */
+.sf-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.sf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.sf-chip { position: relative; }
+.sf-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.sf-chip i { font-style: normal; color: var(--faint);
+             font-variant-numeric: tabular-nums; font-size: 9px; }
+.sf-chip:hover { border-color: var(--faint); }
+.sf-chip:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sf-chip:has(input:checked) i { color: var(--accent); }
+/* Nobody in the store has been messaged this many times. Left tickable — it
+ * will be true after the next run — but dimmed, so the row reads as a tally of
+ * what is there rather than as six equal options. */
+.sf-chip.empty { opacity: .45; }
+/* Keyboard focus lands on a hidden checkbox, so the chip has to show it. */
+.sf-chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Sits between the last fold and the buttons, so it reads as a note on the
+   whole rail rather than as part of any one group. */
+.sf-note { font-size: 10px; color: var(--faint); line-height: 1.4;
+           padding-top: 2px; border-top: 1px solid var(--line-soft); }
+
+/* From and to, read as a pair rather than as two unrelated fields. */
+.store-filters .sf-row { display: flex; align-items: center; gap: 5px; }
+.store-filters .sf-row input[type="number"] { flex: 1; width: auto; }
+.store-filters .rng-dash { color: var(--faint); }
+
+.store-filters .sf-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.store-filters .sf-foot .grow { flex: 1; }
+
+/* Under a narrow window the rail goes back to being a row above the table: at
+ * that width a 208px column costs the bios their last readable inch. */
+@media (max-width: 1100px) {
+  .store-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .store-filters {
+    order: -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 8px 10px;
+  }
+  .store-filters .sf-head { flex-basis: 100%; padding-bottom: 6px; }
+  .store-filters .sf-group { flex: 1 1 170px; min-width: 150px; border-top: 0; padding-top: 0; }
+  /* Open, a group needs its own line - a select and a row of chips do not sit
+     next to each other at this width. Shut, it is one summary and they pack. */
+  .store-filters .sf-group[open] { flex-basis: 100%; }
+  .store-filters .sf-note { flex-basis: 100%; }
+  .store-filters .sf-foot { flex-basis: 100%; padding-top: 0; border-top: 0; }
+}
+
+/* The row number the range is counted in. It goes on counting from where the
+ * range starts once one is taken — rows 40-90 read as 40-90, not as 1-51. */
+.store-table .c-n { width: 38px; color: var(--faint);
+                    font-variant-numeric: tabular-nums; }
+.store-table .c-groups { width: 22%; color: var(--muted); }
+.store-table .c-used { width: 74px; font-variant-numeric: tabular-nums; }
+/* What the bio says the account IS, as against the c-cats column beside it —
+   which says where it was scraped FROM. Two different questions, so two
+   columns; the chip is the one this step gets aimed with. */
+.store-table .c-cat { width: 96px; }
+
+/* The Find categories a member was scraped under. Several fit, wrapping, so a
+   member on events under three tabs reads as three rather than one truncated
+   line. */
+.store-table .c-cats { width: 16%; }
+.store-table .c-cats .tag {
+  display: inline-block;
+  padding: 0 6px;
+  margin: 1px 0;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+/* The count beside the card's title. Never wraps: it shares that line with a
+   heading and three buttons, and a second line there pushes the heading around
+   every time the number changes. */
+#store-count { white-space: nowrap; }
+
+/* Name and id on ONE line, the id beside the name rather than stacked under it.
+   A row here is a recipient, and a recipient reads as "Tom #42380392" — two
+   stacked lines doubled the height of every row for a fact that fits on the end
+   of the first one. Wrapped when it has to be, so a long name does not push the
+   id out of the cell. */
+.store-table .who-text { display: flex; align-items: baseline; flex-wrap: wrap;
+                         gap: 3px 7px; min-width: 0; }
+.store-table .m-name { color: var(--ink); font-weight: 500; }
+/* Nobody has read this member's name yet — the handle beside it is all there
+   is. */
+.store-table .m-name.none { color: var(--faint); font-weight: 400;
+                            font-style: italic; }
+.store-table .m-handle { font-size: 9.5px; color: var(--muted);
+                         text-decoration: none; border: 0;
+                         white-space: nowrap;
+                         font-family: ui-monospace, Consolas, monospace; }
+.store-table .m-handle:hover { color: var(--accent); }
+.store-table .st { font-size: 9px; gap: 4px; padding: 1px 6px; }
+
+/* ── Media grid (campaign step 4) ───────────────────────────── */
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.media-tile {
+  position: relative;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--raised);
+  aspect-ratio: 1;
+  padding: 0;
+}
+.media-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.media-tile:hover { border-color: var(--faint); }
+.media-tile.on { border-color: var(--accent); }
+.media-tile .name {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, .66);
+  color: var(--ink);
+  font-size: 10px;
+  padding: 3px 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.media-tile .pick {
+  position: absolute; top: 6px; right: 6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: none; place-items: center; font-size: 11px;
+}
+.media-tile.on .pick { display: grid; }
+
+/* The one button that sends, and the line that says what is stopping it.
+ *
+ * FILLED blue rather than the outline every other .danger button wears. It is
+ * the only control on the page that puts words in other people's inboxes, and
+ * it sits beside Campaign live and Re-check — an outline among outlines is not
+ * what the end of a five-step wizard should look like. Scoped to this id, so
+ * the destructive buttons elsewhere keep the outline that tells them apart from
+ * a primary. */
+#camp-start {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+/* :enabled, not a bare :hover — the generic button:disabled:hover that would
+ * normally hold the line is only (0,2,1) and loses to an id, so without this a
+ * disabled Start lights up blue under the pointer as if it could be pressed. */
+#camp-start:enabled:hover { background: var(--accent-hover);
+                            border-color: transparent; color: #fff; }
+/* Darker when pressed, like the other filled buttons: tinting a control whose
+ * resting state is already the accent washes it out instead of pushing it in. */
+#camp-start:enabled:active { background: var(--accent-press); border-color: transparent; color: #fff; }
+
+#camp-start-note { margin: 0; font-size: 11.5px; }
+/* Disabled wins over the fill above — a pink button that cannot be pressed is
+ * the one thing this control must never look like. */
+#camp-start:disabled {
+  opacity: .45;
+  background: var(--raised);
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+/* ── Skipping a step ────────────────────────────────────────── */
+/* On Messages and on Media, one at a time. The disabled one is dimmed rather
+ * than hidden: it has to stay visible to say WHY it cannot be used, which is
+ * that the other one is. */
+
+.card-head .skip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10.5px; font-weight: 600;
+  cursor: pointer;
+}
+.card-head .skip:hover { color: var(--ink); border-color: var(--faint); }
+.card-head .skip input { accent-color: var(--warn); width: 12px; height: 12px;
+                         margin: 0; cursor: pointer; }
+.card-head .skip:has(input:checked) { color: var(--warn);
+                                      border-color: rgba(154, 103, 0, .5);
+                                      background: rgba(154, 103, 0, .12); }
+.card-head .skip.off { opacity: .4; cursor: not-allowed; }
+.card-head .skip.off input { cursor: not-allowed; }
+
+/* ── Drafts ─────────────────────────────────────────────────── */
+/* A strip of tabs over one editor. The drafts are ALTERNATIVES — the sender
+ * rotates between them — so they are versions of one message rather than six
+ * messages in an order, and six stacked textareas said the opposite while
+ * making you scroll to reach the one you meant. */
+
+.d-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.d-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 11px; font-weight: 600;
+  max-width: 190px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.d-tab:hover { color: var(--ink); border-color: var(--faint); }
+.d-tab.on {
+  color: var(--accent);
+  border-color: rgba(16, 131, 254, .45);
+  background: var(--accent-soft);
+}
+/* Disabled is dimmed, not hidden: the text is still there and still worth
+ * finding, which is the whole difference from deleting it. */
+.d-tab.off { color: var(--faint); text-decoration: line-through;
+             text-decoration-thickness: 1px; }
+.d-tab.off.on { color: var(--muted); }
+.d-tab .d-dot {
+  width: 5px; height: 5px; flex: none;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.d-editor {
+  margin-top: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.d-bar { margin: 0 0 8px; align-items: center; }
+.d-rename { flex: none; }
+.d-rename input { width: 150px; }
+.d-state { font-size: 10.5px; color: var(--faint); }
+.d-state.is-off { color: var(--warn); }
+/* The text box, with the file import sitting in its corner. It replaces a card
+ * with a 120px dropzone in it: importing a file is a thing you do once, and it
+ * was taking more room than the editor it feeds. */
+.d-box { position: relative; }
+.d-editor textarea { background: var(--bg); width: 100%; padding-right: 40px; }
+.d-import {
+  position: absolute; top: 7px; right: 7px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--faint);
+}
+.d-import:hover { color: var(--accent); border-color: var(--line);
+                  background: var(--raised); }
+.d-import .ic { width: 14px; height: 14px; }
+
+/* A file dragged anywhere over the drafts box. The whole box takes the drop,
+ * not the icon: aiming at a 22px target with a file in hand is not a thing to
+ * ask of anyone. */
+#drafts.over .d-box textarea { border-color: var(--accent);
+                               background: var(--accent-soft); }
+#drafts.busy { opacity: .6; pointer-events: none; }
+.d-foot { display: flex; align-items: center; gap: 10px; margin-top: 6px;
+          font-size: 10.5px; }
+
+/* Something typed and not yet written to the store. Said on the button that
+ * would write it and on the card's own count, because the panel is a window onto
+ * the store and "on screen" is not "stored". */
+button.dirty { border-color: rgba(154, 103, 0, .5); color: var(--warn); }
+button.dirty::after { content: " •"; }
+#draft-count.is-dirty { color: var(--warn); }
+
+/* ── Settings ───────────────────────────────────────────────── */
+
+/* One setting, with a switch of its own above the list. It is the only one that
+ * decides whether a run talks to anybody, so it is the only one that gets to
+ * look like a decision rather than a row in a table. */
+.set-toggle {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.set-toggle .st-text { display: grid; gap: 2px; min-width: 0; }
+.set-toggle .st-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.set-toggle .st-help { font-size: 11.5px; color: var(--muted); max-width: 62ch; }
+
+/* Off is the state worth noticing, so off is the state that is coloured. On is
+ * ordinary — it is what every run has always done. */
+button.toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-width: 82px;
+  justify-content: center;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(154, 103, 0, .5);
+  background: rgba(154, 103, 0, .12);
+  color: var(--warn);
+  font-weight: 600;
+}
+button.toggle .dot { margin: 0; background: var(--warn); }
+button.toggle.on {
+  border-color: rgba(26, 127, 55, .45);
+  background: rgba(26, 127, 55, .12);
+  color: var(--ok);
+}
+button.toggle.on .dot { background: var(--ok); }
+
+.settings { display: grid; }
+
+/* ── The panel, in sections ──────────────────────────────────────
+   Sixty rows in schema order is a list you search rather than read, so they
+   are filed under the panel that runs them and, inside that, under the job
+   they do. <details> so a section you are not working on folds away to one
+   line, and so the folding is the browser's rather than something a repaint
+   can lose. */
+.set-sec { border-bottom: 1px solid var(--line); }
+.set-sec:last-of-type { border-bottom: none; }
+.set-sec > summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 4px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.set-sec > summary::-webkit-details-marker { display: none; }
+/* The twisty is drawn here rather than left to the browser's default, which
+   is a different glyph in every one of them and sits on the wrong baseline in
+   most. */
+.set-sec > summary::before {
+  content: ""; flex: none;
+  width: 6px; height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  margin: 0 2px 2px 3px;
+  transition: transform .12s ease;
+}
+.set-sec[open] > summary::before { transform: rotate(45deg); margin-bottom: 4px; }
+.set-sec > summary:hover { background: var(--raised); }
+.set-sec > summary .ic { width: 15px; height: 15px; color: var(--muted); flex: none; }
+.set-sec .ss-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.set-sec .ss-n {
+  font-size: 10.5px; color: var(--muted);
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+/* The one thing on the line allowed to run out of room, so `min-width: 0` —
+   a flex item will otherwise refuse to shrink below its text and push the
+   count off the end instead of trimming itself. */
+.set-sec .ss-note {
+  min-width: 0;
+  font-size: 11.5px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.set-sec .ss-body { padding: 0 0 10px 0; }
+
+/* One job's worth of settings. The rule down the left is what says these rows
+   belong together — a heading alone reads as a break between two flat lists,
+   not as a bracket around one. */
+.set-grp {
+  padding: 2px 0 2px 14px;
+  margin: 0 0 4px 6px;
+  border-left: 2px solid var(--line);
+}
+.set-grp > h4 {
+  margin: 8px 0 0;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+}
+.set-grp > .sg-help {
+  margin: 3px 0 0;
+  font-size: 11.5px; color: var(--muted);
+  max-width: 78ch;
+}
+.set-grp > .settings-rows { margin-top: 4px; }
+
+.setting {
+  display: grid;
+  grid-template-columns: 210px 120px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.setting:last-child { border-bottom: none; }
+.setting .k { color: var(--ink); font-family: ui-monospace, Consolas, monospace;
+              font-size: 11.5px; }
+.setting .help { color: var(--muted); font-size: 11.5px; }
+.setting input[type=checkbox] { justify-self: start; width: 16px; height: 16px;
+                                accent-color: var(--accent); }
+
+/* A URL row. The 120px middle column is sized for a number, so a text setting
+   drops the three-across grid and stacks: name, full-width box, help, chips. */
+.setting.wide { grid-template-columns: 1fr; gap: 6px; padding: 12px 4px; }
+.setting.wide input[type=text] {
+  width: 100%;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+}
+.setting.wide .toks { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.setting.wide .tok {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+/* A list setting — the cities a scrape searches from. Rows wrap across the
+   panel's width rather than stacking down it: ten short names as ten full-width
+   rows is a screenful of mostly empty box. */
+.setting.list .rows { display: flex; flex-wrap: wrap; gap: 6px; }
+.setting.list .list-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+}
+/* One fixed width, not sized to its text: a row that grew as it was typed in
+   would shuffle the whole wrap under the cursor. Carries `.wide` and the element
+   so it outranks the full-width box `.setting.wide input[type=text]` gives every
+   other text setting. */
+.setting.wide.list input.list-in {
+  width: 118px;
+  border: none;
+  background: none;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.setting.list .list-in:focus { outline: none; color: var(--ink); }
+.setting.list .list-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.setting.list .list-x:hover { color: var(--bad); background: rgba(207, 34, 46, .12); }
+/* Already in the list. Shown on the row that already has it rather than as an
+   error on the box — the answer to "why did nothing happen" is up there. */
+.setting.list .list-row.dupe {
+  border-color: var(--warn);
+  background: rgba(154, 103, 0, .16);
+}
+.setting.list .list-none { color: var(--muted); font-size: 11.5px; margin: 2px 0; }
+.setting.list .add { display: flex; align-items: center; gap: 8px; }
+.setting.wide.list input.add-in { flex: 1; min-width: 0; width: auto; }
+.setting.list .add-go { padding: 4px 12px; }
+.setting.list .list-n { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+
+/* The filled-in example. Wraps rather than stretching the panel, and is dimmed
+   because it is what the line MEANS, not another thing to edit. */
+.setting.wide .ex {
+  color: var(--muted);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* ── Activity feed ──────────────────────────────────────────── */
+
+.feed {
+  grid-area: feed;
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  padding: 16px 18px;
+  overflow: auto;
+  max-height: calc(100vh - 66px);
+}
+
+.feed-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.feed-head strong { font-size: 16px; font-weight: 600; }
+
+.feed ul { list-style: none; margin: 0; padding: 0; }
+
+/* Four columns: when, from where, what, and the outcome. Fixed positions mean
+ * the eye scans one column instead of re-parsing every line. */
+.feed li {
+  display: grid;
+  grid-template-columns: 74px 78px 1fr auto;
+  align-items: start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.feed li:last-child { border-bottom: none; }
+
+.feed time { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+.feed .msg { color: var(--ink); word-break: break-word; }
+.feed li.warn .msg { color: var(--warn); }
+.feed li.error .msg { color: var(--bad); }
+
+/* Source badge. Each source gets its own hue so a burst from one subsystem is
+ * visible as a block of colour before any of it is read. */
+.feed .src {
+  justify-self: start;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.feed .src[data-src="campaign"] { color: #0a6fe0; background: rgba(10, 111, 224, .10); }
+.feed .src[data-src="accounts"] { color: #6d28d9; background: rgba(109, 40, 217, .10); }
+.feed .src[data-src="config"],
+.feed .src[data-src="ui"]       { color: #42576c; background: rgba(66, 87, 108, .12); }
+.feed .src[data-src="data"]     { color: #0f766e; background: rgba(15, 118, 110, .10); }
+.feed .src[data-src="browser"]  { color: #8a6d00; background: rgba(138, 109, 0, .10); }
+.feed .src[data-src="scrape"]   { color: #0e7490; background: rgba(14, 116, 144, .10); }
+.feed .src[data-src="sessions"] { color: #15803d; background: rgba(21, 128, 61, .10); }
+.feed .src[data-src="store"]    { color: #b45309; background: rgba(180, 83, 9, .10); }
+.feed .src[data-src="server"],
+.feed .src[data-src="http"]     { color: var(--muted); }
+
+/* Status code badge — the outcome, pulled out of the message so a wall of 200s
+ * and a wall of 503s look different from across the room. */
+.feed .code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.feed .code.c2 { color: var(--ok); background: rgba(26, 127, 55, .12); border-color: rgba(26, 127, 55, .3); }
+.feed .code.c4 { color: var(--warn); background: rgba(154, 103, 0, .12); border-color: rgba(154, 103, 0, .3); }
+.feed .code.c5 { color: var(--bad); background: rgba(207, 34, 46, .12); border-color: rgba(207, 34, 46, .3); }
+
+/* ── Scraping: the run button with the scraping type under it ───── */
+.scrape-run { display: flex; align-items: center; gap: 8px; }
+/* The type chips sit in the heading itself, between the clocks and the
+   button, so the line reads: what has been found, what kind of scrape, run. */
+.panel[data-panel="scraping"] .card-head { flex-wrap: nowrap; }
+.panel[data-panel="scraping"] .scrape-type { margin: 0 4px 0 0; justify-content: flex-end;
+  gap: 5px; flex-wrap: nowrap; min-width: 0; }
+.panel[data-panel="scraping"] .scrape-type .as-label { font-size: 10.5px; white-space: nowrap; }
+.panel[data-panel="scraping"] .scrape-type .as-chip { font-size: 10.5px; padding: 3px 8px;
+  white-space: nowrap; }
+/* Narrow: the chips keep their words and drop their marks rather than pushing
+   the run button onto a line of its own. */
+@media (max-width: 1500px) {
+  .panel[data-panel="scraping"] .scrape-type .as-chip .ic { display: none; }
+  .panel[data-panel="scraping"] .scrape-type .as-chip { padding: 3px 7px; }
+}
+
+/* ── Scraping: the FB groups chooser ────────────────────────────── */
+/* ── FB Groups, inside the Scraping panel ────────────────────────
+   Three boxes: the accounts, the groups left to scrape, and the ones done.
+   The middle one is where the work happens, so it takes the width. */
+.scr-groups { margin: 0 0 8px; }
+/* The group being read right now. One line per account walking. */
+.scr-live { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px;
+            padding: 5px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+            background: var(--card); font-size: 11.5px; }
+.scr-live .row1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.scr-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+                 animation: pulse 1.4s ease-in-out infinite; flex: none; }
+.scr-live .who { color: var(--muted); font-size: 10.5px; }
+.scr-live .g { font-weight: 600; min-width: 0; overflow: hidden;
+               text-overflow: ellipsis; white-space: nowrap; }
+.scr-live .n { color: var(--muted); font-size: 10.5px; white-space: nowrap;
+               font-variant-numeric: tabular-nums; }
+.scr-live .bar { height: 3px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.scr-live .bar i { display: block; height: 100%; background: var(--accent); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+/* The group being read, at the top of the Scraped list until it is done. */
+.scr-reading td { background: rgba(16, 131, 254, .07); }
+.scr-reading .m-name { font-weight: 600; }
+.scr-reading .scr-acct { color: var(--accent); }
+.scr-grid { display: grid; grid-template-columns: 190px minmax(0, 1fr) minmax(0, 270px);
+            gap: 10px; align-items: stretch; }
+.scr-box { display: flex; flex-direction: column; gap: 6px; min-width: 0;
+           padding: 8px 10px; border: 1px solid var(--line);
+           border-radius: var(--radius-sm); background: var(--card); }
+.scr-box-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.scr-box-head .ic { width: 15px; height: 15px; color: var(--muted); }
+.scr-box-head .ic.ok { color: var(--ok); }
+.scr-box-head .muted { font-size: 11px; }
+.scr-badge { font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+             background: rgba(26, 127, 55, .12); color: var(--ok); font-variant-numeric: tabular-nums; }
+
+/* The accounts. One row each, its own unscraped count. The list runs the
+   whole height of the box and scrolls inside it, however many accounts. */
+.scr-acct-list { display: flex; flex-direction: column; gap: 3px; flex: 1;
+                 min-height: 0; overflow-y: auto; }
+.scr-acct-btn { display: flex; align-items: center; gap: 6px; width: 100%;
+                padding: 5px 8px; font-size: 11.5px; text-align: left; border: 0;
+                background: transparent; border-radius: var(--radius-sm); }
+.scr-acct-btn:hover { background: var(--hover, rgba(0, 0, 0, .04)); }
+.scr-acct-btn .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scr-acct-btn .ic { width: 15px; height: 15px; color: var(--muted); }
+.scr-acct-btn.on { background: rgba(16, 131, 254, .10); color: var(--accent); font-weight: 600; }
+.scr-acct-btn.on .ic { color: var(--accent); }
+.scr-acct-btn .tab-n { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 999px;
+                       background: rgba(26, 127, 55, .12); color: var(--ok); font-variant-numeric: tabular-nums; }
+
+/* The search box over the unscraped list. */
+.scr-search { display: flex; align-items: center; gap: 6px; padding: 3px 8px;
+              border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.scr-search .ic { width: 14px; height: 14px; color: var(--faint); }
+.scr-search input { flex: 1; min-width: 0; border: 0; padding: 3px 0; font-size: 11.5px; background: transparent; }
+.scr-search input:focus { outline: none; }
+
+/* The middle list sets the row's height; the scraped list beside it runs
+   the whole of it and scrolls inside. */
+.panel[data-panel="scraping"] .scr-un .scr-col-wrap { height: 248px; max-height: 248px; }
+.panel[data-panel="scraping"] .scr-done .scr-col-wrap { flex: 1; min-height: 120px; max-height: none; }
+/* One line a group, so twelve rows are twelve rows however long the name is. */
+.scr-box .m-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scr-box tbody td { max-width: 0; }
+.scr-col-wrap td { padding: 2px 8px; }
+.scr-table .c-tick, .scr-table td.c-tick { width: 26px; text-align: center; }
+.scr-table .c-tick input { width: 13px; height: 13px; margin: 0; cursor: pointer; }
+.scr-table .c-go, .scr-table td.c-go { width: 46px; text-align: right; }
+.c-ppl { width: 62px; } .c-when { width: 74px; }
+/* Under the number read: what the group says its membership is, so a group
+   read to 320 of 4,532 still says so long after the run ended. */
+.of-total { display: block; font-size: 9.5px; color: var(--faint); line-height: 1.1; }
+/* The bin on a scraped row: quiet until the row is under the pointer. */
+.c-del { width: 26px; }
+.scr-del { padding: 1px 4px; border: 0; background: transparent; color: var(--faint);
+           border-radius: 4px; cursor: pointer; }
+.scr-del .ic { width: 13px; height: 13px; }
+.scr-del:hover { color: var(--bad); background: rgba(207, 34, 46, .10); }
+.scr-del[disabled] { opacity: .4; cursor: not-allowed; }
+.scr-table .c-gid, .scr-table td.c-gid { width: 120px; font-size: 10.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scr-box .scr-acct { color: var(--muted); font-size: 10px; margin-left: 6px; }
+.scr-view { font-size: 10.5px; color: var(--accent); text-decoration: none; }
+.scr-view:hover { text-decoration: underline; }
+
+/* When Bluesky was last asked, and the pages under the list. */
+.scr-sync { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.scr-foot { display: flex; align-items: center; gap: 6px; }
+.scr-pages { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.scr-pages button { padding: 1px 7px; font-size: 10.5px; min-width: 22px; justify-content: center; }
+.scr-pages button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.scr-pages .gap { font-size: 10.5px; color: var(--faint); padding: 0 2px; }
+.scr-box .tiny { font-size: 11px; }
+.scr-done > .tiny, .scr-foot .primary { justify-content: center; }
+.scr-groups-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.scr-groups-foot .muted { font-size: 10.5px; min-width: 0; overflow: hidden;
+                          text-overflow: ellipsis; white-space: nowrap; }
+.scr-empty { display: flex; flex-direction: column; align-items: center; gap: 2px;
+             padding: 18px 8px; text-align: center; color: var(--muted); font-size: 11px; }
+
+/* With the FB Groups boxes open, the roster below gives them the room. */
+.panel[data-panel="scraping"].groups-mode #pipe-mem-wrap { max-height: min(calc(100svh - 560px), 560px); min-height: 110px; }
+@media (max-width: 1250px) {
+  .scr-grid { grid-template-columns: 170px minmax(0, 1fr); }
+  .scr-box.scr-done { grid-column: 1 / -1; }
+}
+
+/* ── Group Posting: the group chooser ───────────────────────────── */
+dialog.grp-choose[open] { width: min(760px, 94vw); }
+.grp-choose-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.grp-skip { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+.grp-skip input { margin: 0; }
+.grp-choose-wrap { max-height: min(56vh, 520px); }
+.grp-choose .c-tick { width: 34px; text-align: center; }
+.grp-choose .c-tick input { margin: 0; }
+.grp-choose tbody tr { cursor: pointer; }
+.grp-choose tbody tr.off .m-name { color: var(--muted); }
+.grp-choose tbody tr.used .grp-used { color: var(--warn); font-weight: 600; }
+.grp-choose-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.grp-choose-foot .muted { font-size: 11.5px; }
+
+/* ── Campaign settings (the rail's cog) ─────────────────────────
+   The send's own knobs, grouped the way the operator thinks about them rather
+   than as the flat key list the Settings panel shows. */
+
+dialog.cog[open] {
+  width: min(560px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.cog-body { overflow: auto; display: grid; gap: 16px; }
+.cog-group h3 {
+  margin: 0 0 8px;
+  font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .5px;
+  color: var(--faint);
+}
+.cog-group > .cog-help { margin: -4px 0 10px; }
+
+.cog-row {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.cog-group .cog-row:last-child { border-bottom: none; }
+.cog-k { font-size: 12.5px; color: var(--ink); }
+/* Under the name, spanning both columns — a help line squeezed into a third
+   column wraps to three words a row. */
+.cog-row .cog-help { grid-column: 1 / -1; font-size: 10.5px; color: var(--faint); }
+.cog-row input[type=number] { width: 100%; text-align: right;
+                              font-variant-numeric: tabular-nums; }
+.cog-row input[type=checkbox] { justify-self: end; width: 16px; height: 16px;
+                                accent-color: var(--accent); }
+
+/* A min/max pair on one line: side by side with a dash between them they read
+   as the range a value is rolled from, which two stacked rows never did. */
+.cog-span { display: grid; grid-template-columns: 1fr auto 1fr;
+            align-items: center; gap: 6px; }
+.cog-dash { color: var(--faint); }
+
+/* ── Campaign live ──────────────────────────────────────────────
+   The run's own table, full-screen-ish: a campaign is tens to hundreds of rows
+   and the point of the board is seeing where the run has got to without
+   scrolling for it. Wider than the log dialog for the same reason — five columns
+   at 900px puts the message name and the status on top of each other. */
+
+/* [open], not `dialog.live` alone: a closed <dialog> is display:none, and a bare
+   display:flex here would beat that and paint the board over the page for good. */
+
+/* One fixed size, always. `max-height` let the box grow and shrink with its own
+   contents - a run that finishes, a tab with twelve rows instead of ninety, a
+   tally line that wraps - and a centred <dialog> that changes height re-centres,
+   so the whole board jumped up the screen under the cursor. A campaign is
+   watched for a long time from one position; it has to stay where it was put.
+
+   90vh, and 1188px wide - a tenth more than the 1080 it was, which is the column
+   the DM and MEDIA names needed. The vw caps only bite on a window narrower than
+   the fixed size, where they stop the board running off the edge. */
+dialog.live[open] {
+  width: min(1188px, 96vw);
+  height: 90vh;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  /* Neither dragged nor dragged-out-of-shape. A dialog is not movable by
+     default; this says the size is not up for negotiation either. */
+  resize: none;
+}
+
+.live-head { align-items: center; gap: 9px; }
+.live-head .card-ic { color: var(--accent); }
+
+/* The counts, in the run's own words. Sits between the title and Close, so the
+   one number that is moving is next to the thing it is about. */
+.live-tally { display: flex; flex-wrap: wrap; gap: 6px; }
+.live-tally .st { font-size: 9.5px; padding: 2px 8px; }
+.live-tally .st .ic { width: 11px; height: 11px; }
+
+/* The table scrolls, the header and the footer do not — a board whose summary
+   line has scrolled off is a board you have to scroll to read. */
+.live-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+/* One tab per account the campaign is running from. Sits between the header and
+   the table because that is what it switches — the header's counts are the
+   whole campaign, the table below is this account's share of it. */
+.live-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding-bottom: 2px;
+}
+.live-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-bottom-color: transparent;
+  color: var(--muted);
+}
+.live-tab.on { background: var(--accent-soft); border-color: var(--accent);
+               color: var(--accent); }
+.live-tab .lt-name { font-weight: 600; }
+/* The progress ON the tab: with three accounts going, "which one is behind" is
+   the question, and a strip of bare names makes you click all three to answer
+   it. */
+.live-tab .lt-count { font-family: ui-monospace, Consolas, monospace;
+                      font-size: 10px; color: var(--faint); }
+.live-tab.on .lt-count { color: var(--accent); }
+.live-tab .lt-bad {
+  font-size: 9.5px; font-weight: 600;
+  padding: 0 5px; border-radius: 999px;
+  color: var(--bad); background: rgba(207, 34, 46, .14);
+}
+
+.live-foot { font-size: 11px; padding: 0 2px; }
+.live-foot.ok { color: var(--ok); }
+.live-foot.bad { color: var(--bad); }
+
+.live-table .c-sms { width: 90px; }
+.live-table .c-media { width: 150px; color: var(--muted); }
+.live-table td.pad { padding: 18px; text-align: center; }
+
+/* Which draft, and which picture. A chip rather than the text itself: the words
+   are on hover, and a column of message bodies cannot be read down. */
+.live-table .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--ink);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.live-table .tag .ic { width: 10px; height: 10px; flex: none; color: var(--faint); }
+.live-table .tag.media { color: var(--muted); }
+
+/* ── Store log dialog ───────────────────────────────────────── */
+
+dialog {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  width: min(900px, 92vw);
+}
+dialog::backdrop { background: rgba(11, 15, 20, .55); }
+dialog pre {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11.5px;
+  max-height: 62vh;
+  overflow: auto;
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px;
+                            border: 2px solid var(--card); }
+::-webkit-scrollbar-thumb:hover { background: #b8c4cf; }
+
+/* ── What bluesky-bot has that meetup-bot did not ─────────────────────
+   Everything above is the meetup-bot console, recoloured. This is the handful
+   of controls the change of subject actually required — kept together at the
+   end so the diff between the two stylesheets stays readable. */
+
+/* The bio, off the hover card — what the account says it is. THE flexible
+   column: the three around it are fixed, so every pixel the board is not using
+   goes here, which is where the reading actually happens.
+
+   One line, clipped with an ellipsis, the whole of it on the title. A roster is
+   scanned down the column for the handful worth messaging; letting a paragraph
+   wrap would put three rows on screen where thirty belong, and the table is
+   inside a fixed-height scroller where that is felt immediately. */
+.mem-table .c-bio { max-width: 0; }        /* let the ellipsis work in a table */
+.mem-table .bio-text {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+/* An account that wrote no bio, and one whose card has not been read yet. Two
+   different things, and a blank cell says neither — the first is a judgement
+   already made, the second is one still coming. */
+.mem-table .bio-none { color: var(--faint); font-style: italic; }
+.mem-table .bio-none.pending { opacity: .65; }
+
+/* The account column keeps a sensible share when the bio is long: without a
+   width the flexible column starves it and handles start wrapping. */
+.mem-table .c-acct { width: 30%; min-width: 150px; }
+
+/* ── Data: one card, and the list scrolls inside it ──────────────
+   Left to itself the card grows to fit four hundred rows, the whole page
+   scrolls, and the card head — which carries the pickers the table is being
+   filtered BY — leaves the screen at the first turn of the wheel. Backwards:
+   the filters are what the rows are read against.
+
+   The bound is `svh`, not a percentage. `body` is a grid with `min-height:
+   100vh` rather than a height, so its rows are indefinite and a `height: 100%`
+   here would resolve to auto and do nothing at all. A viewport unit needs
+   nothing from an ancestor. `svh` over `vh` because on a phone `vh` is the tall
+   viewport — the one behind the address bar — so a `vh`-bounded list is a list
+   whose last rows sit under browser chrome.
+
+   The card is a flex column so the head and the foot keep their place and only
+   the table's wrapper takes the slack; `min-height: 0` is what lets that wrapper
+   be shorter than its content, which is the whole trick. */
+.panel[data-panel="data"] .data-card {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100svh - 128px);
+  min-height: 0;
+  margin-bottom: 0;
+}
+/* The head wraps rather than squeezing: four controls and four buttons will not
+   share a line on a narrow window, and a squashed select is worse than a second
+   row. Neither it nor the foot may give up height to the table. */
+.panel[data-panel="data"] .data-card .card-head {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  flex: none;
+}
+.panel[data-panel="data"] .board-foot { flex: none; }
+
+/* The Data panel's own accounts table. It reuses .mem-table wholesale — the same
+   five columns saying the same five things as the scraping board, and a second
+   look for the same table would be two things to keep in step for no reason.
+   Only the frame differs: this one stands on its own rather than inside a board,
+   so it keeps its border and gets a height of its own. */
+/* Takes whatever height the card has left. The max-height is the fallback for a
+   browser that does not give the flex column a definite height — bounded is the
+   one thing this must be, whichever way it gets there. */
+.acct-wrap {
+  flex: 1;
+  min-height: 0;
+  /* The belt to the card's braces: if the flex sizing above is ever defeated —
+     a browser without svh, a card that lost its height — the list is still
+     bounded and still scrolls itself rather than the page. */
+  max-height: min(72svh, 900px);
+  overflow-y: auto;
+}
+#acct-table td { padding: 2px 8px; }
+#acct-table .avatar { width: 17px; height: 17px; }
+#acct-table .avatar .ic { width: 10px; height: 10px; }
+
+/* What the bio says the account is. A chip, because this column is scanned for a
+   shape rather than read — and tinted from the label's own letters, so Real
+   estate is the same colour every time rather than a colour that changes as rows
+   are filtered. One hue, low saturation: twenty categories at full strength
+   would be a fruit salad next to a column of bios. */
+.mem-table .c-cat { width: 104px; }
+.cat-chip {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  color: hsl(var(--cat-h) 70% 72%);
+  background: hsl(var(--cat-h) 70% 72% / .13);
+  border: 1px solid hsl(var(--cat-h) 70% 72% / .3);
+}
+.cat-none { color: var(--faint); }
+
+/* Which scrape to look inside. Reads as one phrase with the select beside it —
+   "From: all targets" — rather than as a labelled field. */
+.acct-from {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.acct-from select { max-width: 230px; font-size: 11.5px; padding: 4px 8px; }
+
+/* Filtering a few thousand rows down to the one being looked for. Sized to the
+   card head it sits in rather than the page: it is how you reach a row, not the
+   point of the panel. */
+.acct-search {
+  width: 190px;
+  font-size: 11.5px;
+  padding: 4px 8px;
+}
+
+/* Followers, and whether a DM can land. The two facts that decide whether a
+   scraped row is worth a slot in a campaign, so they are columns rather than
+   something to open a profile for. */
+.mem-table .c-followers, .mem-table .c-dm { width: 92px; white-space: nowrap; }
+.mem-table .c-followers { font-variant-numeric: tabular-nums; color: var(--muted); }
+.store-table .c-dm { width: 76px; }
+/* Set even smaller inside the tables than a status badge normally is: it
+   appears on every row, and at badge size a column of them out-shouts the
+   handles they are about. */
+.mem-table .c-dm .st, .store-table .c-dm .st { font-size: 8.5px; padding: 1px 6px; }
+
+/* The per-row delete. Narrow, and faint until the row is under the pointer:
+   it is on every one of three hundred rows and it is the one control here that
+   cannot be undone, so a column of live red down the side of the table would
+   both shout and invite the accident. It stays reachable by keyboard - the
+   focus style is the same rule as the hover one - because a control that only
+   exists on hover does not exist for anyone tabbing through. */
+.mem-table .c-drop { width: 34px; padding-left: 0; padding-right: 6px; }
+.mem-table .row-drop { opacity: 0; color: var(--faint); border-color: transparent;
+  background: none; transition: opacity .12s ease, color .12s ease; }
+.mem-table tr:hover .row-drop,
+.mem-table .row-drop:focus-visible { opacity: 1; }
+.mem-table .row-drop:hover { color: var(--accent); border-color: rgba(16, 131, 254, .34); }
+.mem-table .row-drop.busy { opacity: 1; }
+
+/* A window is open on this account right now. Small, uppercase and in the
+   accent — it is a state, not a label, and it has to be legible on the pink
+   card a stored session already gives it. */
+.ac-live {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 8.5px; font-weight: 700;
+  letter-spacing: .5px;
+  color: var(--ok);
+  background: rgba(26, 127, 55, .14);
+  border: 1px solid rgba(26, 127, 55, .4);
+}
+
+/* The scraping panel's own density, restated for the columns added above — a
+   bio, a follower count and a DM badge must not be what sets the row height. */
+#pipe-mem-table .c-bio, #pipe-mem-table .c-followers, #pipe-mem-table .c-dm {
+  padding: 1px 8px;
+}
+/* The board is a fixed-height scroller, so the table must be free to give the
+   bio whatever is left rather than sizing itself to the longest one. */
+#pipe-mem-table { table-layout: fixed; }
+
+/* A checklist line that is worth knowing but is not stopping anything. bluesky-bot
+   has one — how many recipients have closed DMs — and meetup-bot had no
+   equivalent, because every scraped member was messageable by definition.
+   It reads in the info hue rather than the amber kept for a line that is
+   actually holding the Start button down: five amber marks where only one of
+   them blocks is a list the operator has to re-read to use. */
+.checklist li.soft .mark {
+  background: rgba(79, 70, 229, .13);
+  border-color: rgba(79, 70, 229, .45);
+  color: var(--info);
+  font-style: italic;
+}
+.checklist li.soft .detail { color: var(--info); opacity: .8; }
+
+/* ── Narrow screens ─────────────────────────────────────────── */
+
+@media (max-width: 1280px) {
+  body { grid-template-columns: 1fr 360px; }
+  .feed li { grid-template-columns: 62px 70px 1fr auto; }
+}
+
+@media (max-width: 1000px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "bar" "main" "feed";
+  }
+  /* The rail goes horizontal — a 216px column next to a narrow body leaves the
+   * step content unusably thin. */
+  .wizard { grid-template-columns: 1fr; }
+  .steps { flex-direction: row; overflow-x: auto; position: static; }
+  .steps button { grid-template-columns: 24px auto; }
+  .steps .label, .steps .tick, .steps .ic { display: none; }
+  /* The rail runs sideways here, so the cog goes to its right end, and the
+     gear stays - it is the only thing on the button once the label is gone. */
+  .steps .cog { margin-top: 0; margin-left: auto; grid-template-columns: 24px; }
+  .steps .cog .num .ic { display: block; }
+  .bar { height: auto; flex-wrap: wrap; gap: 12px; padding: 12px 16px; }
+  .tabs { order: 3; width: 100%; overflow-x: auto; }
+  .feed { border-left: none; border-top: 1px solid var(--line); max-height: 360px; }
+  /* Restated inside the query: the single-column areas above are redefined
+   * here, so without this the stacked layout would keep a row for the feed. */
+  body.no-feed { grid-template-areas: "bar" "main"; }
+  /* The pipe strip carries a caption and Re-read accounts. At this width they
+     cannot share a line, and the caption is the thing that should give. */
+  #pipe-auto-note { order: 9; width: 100%; }
+}
+
+/* A session line naming the wrong account. The card's own text is muted, and a
+   warning that inherits that colour reads as another quiet detail — which is
+   exactly what this one must not be: the run it precedes sends from an account
+   the operator did not pick, and never errors while doing it. */
+.ac-sub .bad,
+.acct-state .bad,
+#camp-session .bad {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+/* An age old enough that "stored" is a claim rather than a fact. Amber and not
+   red: nothing is known to be wrong - the profile may well still be signed in -
+   only that nothing has looked in long enough that the card should stop
+   sounding certain. Same weight as the mismatch line so it lifts off the muted
+   text around it, in the colour that means "look at this", not "this failed". */
+.ac-sub .warn,
+.acct-state .warn,
+#camp-session .warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+/* Eight tabs on a laptop. The padding goes first, then the icons - a label
+   with no icon is still a label, and a tab row you have to scroll to find
+   Settings in is worse than a plain one. */
+@media (max-width: 1600px) {
+  .bar { gap: 14px; padding: 0 16px; }
+  .tabs button { padding: 0 8px; gap: 6px; font-size: 13px; }
+}
+@media (max-width: 1600px) {
+  .tabs button .ic { display: none; }
+}
+/* Tighter again on a small laptop: the logo without the name beside it, and
+   slimmer pills. The name is in the browser's tab title either way. */
+@media (max-width: 1300px) {
+  .bar h1 .wordmark { display: none; }
+  .pills { gap: 6px; }
+  .pill { padding-left: 9px; padding-right: 9px; }
+  .tabs button { padding: 0 7px; font-size: 12.5px; }
+}
+@media (max-width: 1100px) {
+  .bar { gap: 10px; padding: 0 10px; }
+  .tabs button { padding: 0 5px; font-size: 12px; }
+  .pills { gap: 5px; }
+  .pill { padding-left: 7px; padding-right: 7px; font-size: 11px; }
+}
+
+
+/* The post itself: what goes into every group, sitting above the button that
+   sends it so it is read before it is pressed. Empty is the safe state and
+   looks like one - the placeholder says what an empty box means. */
+.grp-post {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.grp-label { font-size: 11px; font-weight: 600; color: var(--ink); }
+.grp-post textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 62px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.grp-post textarea:disabled { opacity: .7; cursor: not-allowed; }
+.grp-post-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.grp-media { display: flex; gap: 6px; flex-wrap: wrap; }
+.grp-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.grp-chip .ic { width: 12px; height: 12px; color: var(--accent); }
+.grp-x {
+  display: grid; place-items: center;
+  width: 17px; height: 17px;
+  padding: 0;
+  border: 0; border-radius: 50%;
+  background: none; color: var(--faint); cursor: pointer;
+}
+.grp-x:hover:not(:disabled) { background: rgba(207, 34, 46, .12); color: var(--bad); }
+.grp-x:disabled { cursor: not-allowed; opacity: .4; }
+.grp-x .ic { width: 10px; height: 10px; color: inherit; }
+
+
+
+/* ── Group Posting ────────────────────────────────────────────────
+
+   The run control sits beside the text it belongs to rather than out at the
+   right-hand edge of the card. On a laptop the card is most of a 1366px
+   window, and a button pushed the whole way right is a button in the corner
+   of the screen, away from the words explaining it and away from everything
+   else the panel is doing. */
+/* ── Group Posting, compact ──────────────────────────────────────────
+   Every line above the table is one line, in small type, so the table - the
+   thing actually read on this panel - gets the height. On a 1366x768 laptop
+   the setup used to take 274px and leave the table four rows. */
+.panel[data-panel="groups"] .card { padding: 12px 14px; }
+
+/* Name, then the account chips on the same line. */
+.grp-head { flex-wrap: wrap; row-gap: 6px; margin-bottom: 8px; }
+.grp-head h2 { font-size: 14px; }
+.grp-head .card-ic { width: 28px; height: 28px; }
+.grp-head #grp-accounts { margin: 0; gap: 6px; }
+.grp-head #grp-accounts .as-label { font-size: 10px; }
+.grp-head #grp-accounts .as-chip { font-size: 11px; padding: 3px 9px; }
+.grp-head #grp-accounts .muted { font-size: 11px; }
+.grp-head #grp-window { font-size: 11px; }
+
+.grp-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 250px);
+  gap: 10px;
+  align-items: stretch;
+  margin: 0 0 8px;
+}
+
+/* Left box: label, a two-line post, and one row of controls. */
+.panel[data-panel="groups"] .grp-post { margin: 0; padding: 8px 10px; gap: 6px; }
+.panel[data-panel="groups"] .grp-label { font-size: 10.5px; }
+.panel[data-panel="groups"] .grp-post textarea { min-height: 42px; font-size: 12px; line-height: 1.4; padding: 5px 8px; }
+.panel[data-panel="groups"] .grp-post-row { gap: 8px; }
+.panel[data-panel="groups"] .grp-post-row .tiny { font-size: 11px; }
+.grp-left { min-width: 0; }
+.grp-existing { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; white-space: nowrap; }
+.grp-existing input { margin: 0; width: 14px; height: 14px; }
+#grp-joined, #grp-stop { justify-content: center; font-size: 12px; padding: 6px 12px; white-space: nowrap; }
+
+/* Right box: name and range on one line, the button, one status line. */
+.grp-join {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  min-width: 0;
+}
+.grp-join-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.grp-range { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.grp-range input { width: 52px; padding: 3px 6px; font-size: 12px; }
+.grp-join button { justify-content: center; font-size: 12.5px; padding-top: 6px; padding-bottom: 6px; }
+
+/* Both status lines: one small line each. */
+.panel[data-panel="groups"] .grp-mini-live {
+  padding: 4px 10px;
+  gap: 8px;
+  font-size: 11px;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.panel[data-panel="groups"] .grp-mini-live .dot { width: 7px; height: 7px; }
+#grp-live { margin: 0 0 6px; }
+.panel[data-panel="groups"] #grp-list-head { margin: 2px 0 6px; font-size: 12px; }
+.panel[data-panel="groups"] #grp-list-head .muted { font-size: 11px; }
+
+/* The section that is NOT running while the other one is: faded as well as
+   disabled, so it reads as out of play at a glance. */
+.grp-left.locked, .grp-join.locked { opacity: .5; }
+.grp-left.locked *, .grp-join.locked * { cursor: not-allowed; }
+
+/* Too narrow for two columns: joining drops under the post. */
+@media (max-width: 1150px) {
+  .grp-top { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The card takes the window and the table takes what the card has left, so
+   the list scrolls under a head that stays put. */
+@media (min-width: 1001px) {
+  .panel[data-panel="groups"].on { height: 100%; }
+  .panel[data-panel="groups"] .card {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100svh - 128px);
+    min-height: 0;
+    margin-bottom: 0;
+  }
+  .panel[data-panel="groups"] .card-head,
+  .panel[data-panel="groups"] .grp-top,
+  .panel[data-panel="groups"] .fb-live,
+  .panel[data-panel="groups"] #grp-list-head { flex: none; }
+  .panel[data-panel="groups"] #grp-wrap {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+
+/* ── Actions grid ─────────────────────────────────────────────────
+   X's own sidebar, mirrored as a wall of buttons. A responsive grid rather
+   than a single column, because these are twelve peers — no order to read down,
+   just a target to aim at — and a tile with its icon over its label is the
+   shape the real rail item has. */
+.act-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.act-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 84px;
+  padding: 16px 12px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, transform .05s;
+}
+
+.act-btn .ic { width: 22px; height: 22px; color: var(--accent); }
+
+.act-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.act-btn:active:not(:disabled) { transform: translateY(1px); }
+
+/* Close. Set apart from the rail it sits at the end of, because it is not one of
+   X's menu items — it is the way out of what one of them opened, and reading it
+   as a thirteenth place to navigate to is exactly the wrong thing. Dashed and in
+   the warning colour: a control you reach for when something is stuck. */
+.act-btn.apart {
+  border-style: dashed;
+  border-color: rgba(207, 34, 46, .4);
+}
+.act-btn.apart .ic { color: var(--bad); }
+.act-btn.apart:hover:not(:disabled) {
+  border-color: var(--bad);
+  background: rgba(207, 34, 46, .1);
+}
+
+/* The one currently firing — setBusy adds .busy — and the disabled wall while
+   no window is open, told apart: the working one keeps the accent, the locked
+   ones fade. */
+.act-btn.busy {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.act-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+
+/* ── The recipients table, filled to the bottom of the window ── */
+
+/* The table IS the step: what is on screen after OK is who gets messaged, so
+ * every row that fits is a row nobody has to scroll to check. It used to stop
+ * at min(46vh, 420px) and leave the rest of the window empty under the card -
+ * measured at 1920x1080, 488px of dead space below a card showing 10 of 360
+ * rows.
+ *
+ * A height cannot be taken, only passed down. `main` already has a definite one
+ * from the body grid; every box between it and the table has to hand it on, and
+ * each one needs `min-height: 0` so that a flex or grid child is ALLOWED to be
+ * shorter than its content - the default `auto` makes it grow instead, and the
+ * table would push the card back off the bottom of the screen.
+ *
+ * Scoped to this one step deliberately. The other four are short cards that
+ * would look wrong stretched to a full screen, and the step rail's `position:
+ * sticky` depends on the wizard keeping `align-items: start` for its own column.
+ *
+ * Above the stacked breakpoint only: below it the feed sits under `main` in a
+ * single column, `main` no longer owns the rest of the window, and a card told
+ * to fill it would be filling a height that means nothing. */
+@media (min-width: 1001px) {
+  /* The shell, pinned to the window. `min-height` alone gives nothing below it
+     a height to inherit - `height: 100%` on a child of an auto-sized box is
+     circular, so it resolves to `auto` and the box grows to fit its content
+     instead. That is why `main`'s own `overflow: auto` never did anything, and
+     why the feed had to pin itself by hand with `calc(100vh - 66px)`.
+     One definite height here and the grid does that arithmetic itself. Only in
+     the two-column layout: stacked, the feed is a THIRD row under main, and a
+     window-height body would squeeze all three instead of letting the page
+     scroll. */
+  body { height: 100vh; }
+
+  .panel[data-panel="campaign"].on,
+  .panel[data-panel="campaign"].on .wizard { height: 100%; }
+
+  /* Both columns stretch: the step body so the recipients table can fill the
+     window, and the rail so its card runs to the bottom rather than ending
+     under the fifth button with bare page below it. The buttons keep to the
+     top of it. */
+  .wizard > .step-body { align-self: stretch; min-height: 0; }
+  .panel[data-panel="campaign"].on .steps { align-self: stretch; justify-content: flex-start; }
+
+  .step[data-step="users"].on {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    /* BOTH axes. A flex item's automatic minimum is its content, on the cross
+       axis too - so without `min-width: 0` the card refuses to be narrower than
+       the widest thing in it (the row of nowrap buttons in its own head) and
+       grows straight out of `main`, taking the page's horizontal scrollbar with
+       it. `min-height: 0` is the same rule on the axis being filled. */
+    min-height: 0;
+    min-width: 0;
+  }
+
+  /* The upload card is not stretched: it is a dropzone and a note, and a
+     full-screen one would be a full screen of nothing. Only the table grows. */
+  #users-store-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    /* The card is the last thing in the step now, and 18px of margin under a
+       box told to reach the bottom is 18px of overflow. */
+    margin-bottom: 0;
+  }
+  #users-store-card .store-body { flex: 1; min-height: 0; min-width: 0; }
+  /* `.store-body` keeps `align-items: start` for the filter rail's sake, so the
+     table has to ask for the stretch by name. */
+  #users-store-card .store-wrap {
+    align-self: stretch;
+    height: 100%;
+    max-height: none;
+  }
+}
+
+/* ── FB Campaign ──────────────────────────────────────────────
+ *
+ * Two steps down the card, each a row of its own: what it does on the left with
+ * the reason under it, the button on the right. The same shape as `.gate`
+ * without the accent border — a gate is a refusal and these are offers, and
+ * they should not read alike. */
+.fb-step {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 4px 0 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+.fb-step-text { display: grid; gap: 3px; max-width: 78ch; }
+.fb-step-text strong { font-size: 13px; }
+.fb-step-text span { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.fb-step-text b { color: var(--ink); font-weight: 600; }
+.fb-step-text em { font-style: italic; }
+
+/* The one-button run: the comment box and its button as a unit on the right
+   of the step, stacked on narrow screens. The box is disabled - locked - for
+   the whole of a run; `paintFb` owns that. */
+.fb-run-controls { display: grid; gap: 8px; width: 280px; max-width: 100%; flex: none; }
+.fb-run-controls input { width: 100%; }
+.fb-run-controls button { justify-content: center; }
+.fb-run-controls input:disabled { opacity: .7; cursor: not-allowed; }
+.fb-run-tabs { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.fb-run-controls .fb-run-tabs input { width: 72px; }
+.fb-run-tabs { flex-wrap: wrap; }
+
+/* Write own / Database, above the comment box. The box dims when the
+   comments come from the database: its text is not what will be posted. */
+.fb-source { margin: 0; }
+.fb-source .as-chip .as-n { margin-left: 4px; }
+.fb-run-controls.from-db #fb-comment-text { opacity: .45; }
+
+/* The per-account tabs on FB Campaign: the board's tab bar, framed on its own
+   because there is no board under it here. */
+.fb-lane-tabs {
+  border: 1px solid var(--line-soft);
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: var(--bg);
+}
+.fb-lane-tabs:not([hidden]) + .fb-live { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+
+/* An account another service is using: visible, named, and not a choice. */
+.active-strip button.as-chip.busy,
+.acct.busy {
+  opacity: .45;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+.active-strip button.as-chip.busy:hover { opacity: .45; }
+.as-busy { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+
+/* On screen only while the walk has something to report — see #fb-live. */
+.fb-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: 12px;
+}
+.fb-live .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.fb-live .dot.on { background: var(--ok); }
+.fb-live .dot.bad { background: var(--warn); }
+.fb-note { color: var(--muted); }
+.fb-count { color: var(--muted); }
+.fb-count b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* The one-shot buttons' step trace. Monospace and pre-wrapped because it is a
+   numbered list of what happened in order, and a post key is a URL long enough
+   to need wrapping rather than a scrollbar. */
+.fb-steps {
+  margin: 10px 0 0;
+  padding: 11px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

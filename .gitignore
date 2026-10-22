@@ -1,0 +1,20 @@
+# What the server writes, and nothing else. The list is short because the repo
+# is: no build step on the frontend, one data directory on the backend, and that
+# directory is the one thing here that must never reach a commit.
+
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+
+# Local runtime state: the credential store, screenshots, uploaded images, and
+# the Chrome profiles that hold live X sessions. Never commit — those directories
+# ARE the sessions, which makes them credentials in all but name.
+backend/data/
+
+*.tmp

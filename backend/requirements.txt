@@ -1,0 +1,13 @@
+# The server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20      # the file uploads: handles, drafts, images
+
+# The browser. After installing, fetch the browser itself once:
+#     python -m playwright install chromium
+playwright==1.49.1
+
+# The object store a finished roster is sent to. Optional at runtime - with no
+# MinIO configured the console never imports it - but pinned here because the
+# upload is a feature of the app rather than a local nicety.
+minio==7.2.20
