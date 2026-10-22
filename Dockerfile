@@ -3,8 +3,13 @@
 # Chrome opens headed on the VM's webtop desktop: the desktop's X socket is
 # mounted in at /tmp/.X11-unix and DISPLAY points at it (see docker-compose.yml
 # and docker/entrypoint.sh). No display server of its own in this image.
+#
+# Chrome is pinned: 156 dies at start (SIGTRAP) on the webtop desktop's X
+# server, while 155 - what insta-bot runs there - works. Raise CHROME_VERSION
+# only after checking a new one opens a window on the webtop.
 FROM python:3.12-slim-bookworm
 
+ARG CHROME_VERSION=155.0.8059.79-1
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
@@ -12,7 +17,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         curl ca-certificates procps tzdata \
         fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
- && curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+ && curl -fsSL -o /tmp/chrome.deb "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${CHROME_VERSION}_amd64.deb" \
  && apt-get install -y --no-install-recommends /tmp/chrome.deb \
  && rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*
 
